@@ -21,6 +21,14 @@ describe('parseYouTubeUrl', () => {
   it('rejects non-youtube links', () => {
     expect(parseYouTubeUrl('https://example.com/watch?v=nope')).toBeNull();
   });
+
+  it('accepts music.youtube.com links', () => {
+    expect(parseYouTubeUrl('https://music.youtube.com/watch?v=abc123xyz99&list=RDAMVM')).toMatchObject({
+      cleanUrl: 'https://www.youtube.com/watch?v=abc123xyz99',
+      kind: 'video',
+      videoId: 'abc123xyz99',
+    });
+  });
 });
 
 describe('buildWhatsAppShareUrl', () => {

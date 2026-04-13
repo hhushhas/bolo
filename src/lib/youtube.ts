@@ -1,8 +1,11 @@
 const youtubeHostnames = new Set([
   'youtu.be',
   'www.youtu.be',
+  'music.youtube.com',
   'youtube.com',
+  'youtube-nocookie.com',
   'www.youtube.com',
+  'www.youtube-nocookie.com',
   'm.youtube.com',
 ]);
 
@@ -23,7 +26,9 @@ export const parseYouTubeUrl = (value: string) => {
   }
 
   try {
-    const url = new URL(trimmed);
+    const url = new URL(
+      /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`,
+    );
 
     if (!youtubeHostnames.has(url.hostname)) {
       return null;
@@ -55,7 +60,12 @@ export const parseYouTubeUrl = (value: string) => {
       }
     }
 
-    if (pathname[0] === 'shorts' || pathname[0] === 'embed' || pathname[0] === 'live') {
+    if (
+      pathname[0] === 'shorts' ||
+      pathname[0] === 'embed' ||
+      pathname[0] === 'live' ||
+      pathname[0] === 'v'
+    ) {
       const videoId = pathname[1];
 
       if (videoId) {

@@ -5,9 +5,14 @@ import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { action } from './_generated/server';
 import { internal } from './_generated/api';
 import { v } from 'convex/values';
-import type { Id } from './_generated/dataModel';
 import type { TranscriptResponse } from 'youtube-transcript';
 import { fetchTranscriptLinesFromYouTube, normalizeTranscriptLines } from '../src/lib/youtubeCaptions';
+import {
+  buildFallbackChapters,
+  buildFallbackSummary,
+  extractJsonObject,
+  type ReaderChapter,
+} from '../src/lib/reader';
 
 const youtubeHostnames = new Set([
   'youtu.be',
@@ -74,9 +79,6 @@ const parseYouTubeUrl = (value: string) => {
   throw new Error('Please paste a valid YouTube video or Shorts link.');
 };
 
-const getYouTubeThumbnailUrl = (videoId: string) =>
-  `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
-
 const fetchTranscriptLines = async (
   videoId: string,
   preferredLanguageCode?: string,
@@ -133,28 +135,6 @@ const splitForTranslation = (text: string, maxChars = 3400) => {
   return chunks;
 };
 
-const fetchMetadata = async (cleanUrl: string, videoId: string) => {
-  const response = await fetch(
-    `https://www.youtube.com/oembed?url=${encodeURIComponent(cleanUrl)}&format=json`,
-  );
-
-  if (!response.ok) {
-    return {
-      channelTitle: undefined,
-      thumbnailUrl: getYouTubeThumbnailUrl(videoId),
-      title: 'YouTube video',
-    };
-  }
-
-  const data = await response.json();
-
-  return {
-    channelTitle: data.author_name as string | undefined,
-    thumbnailUrl: (data.thumbnail_url as string | undefined) ?? getYouTubeThumbnailUrl(videoId),
-    title: (data.title as string | undefined) ?? 'YouTube video',
-  };
-};
-
 const translateTranscript = async ({
   sourceLanguageCode,
   sourceLanguageLabel,
@@ -205,9 +185,66 @@ const translateTranscript = async ({
   return translatedChunks.join('\n\n');
 };
 
-export const transcribeVideo = action({
+const buildReaderExtras = async ({
+  model,
+  provider,
+  readerLanguageLabel,
+  readerText,
+}: {
+  model: string;
+  provider: ReturnType<typeof createOpenRouter>;
+  readerLanguageLabel: string;
+  readerText: string;
+}) => {
+  const shortenedText = readerText.slice(0, 14000);
+
+  try {
+    const { text } = await generateText({
+      model: provider(model),
+      prompt: [
+        `You are creating easy reading notes in ${readerLanguageLabel}.`,
+        'Return valid JSON with exactly this shape:',
+        '{"summary":"...", "chapters":[{"title":"...", "summary":"..."}]}',
+        'Use 3 to 5 chapters. Make the language calm, simple, and helpful for older readers.',
+        'Do not include markdown fences or extra commentary.',
+        '',
+        shortenedText,
+      ].join('\n'),
+      temperature: 0.2,
+    });
+
+    const parsed = extractJsonObject(text) as
+      | {
+          chapters?: ReaderChapter[];
+          summary?: string;
+        }
+      | null;
+
+    const summaryText = parsed?.summary?.trim();
+    const chapters = parsed?.chapters?.filter(
+      (chapter) => chapter?.title?.trim() && chapter?.summary?.trim(),
+    );
+
+    if (summaryText && chapters && chapters.length > 0) {
+      return {
+        chapters,
+        summaryText,
+      };
+    }
+  } catch {
+    // Fall back to heuristic reader notes below.
+  }
+
+  return {
+    chapters: buildFallbackChapters(readerText),
+    summaryText: buildFallbackSummary(readerText),
+  };
+};
+
+export const processEntry = action({
   args: {
     detectedLanguageCode: v.optional(v.string()),
+    entryId: v.id('entries'),
     sourceLanguage: v.string(),
     sourceLanguageLabel: v.string(),
     targetLanguage: v.string(),
@@ -215,26 +252,20 @@ export const transcribeVideo = action({
     transcriptText: v.optional(v.string()),
     youtubeUrl: v.string(),
   },
-  returns: v.id('entries'),
-  handler: async (ctx, args): Promise<Id<'entries'>> => {
-    const { cleanUrl, videoId } = parseYouTubeUrl(args.youtubeUrl);
-    const metadata = await fetchMetadata(cleanUrl, videoId);
-    const timestamp = Date.now();
-
-    const entryId: Id<'entries'> = await ctx.runMutation(internal.entries.createEntry, {
-      ...metadata,
-      createdAt: timestamp,
-      sourceLanguage: args.sourceLanguage,
-      sourceLanguageLabel: args.sourceLanguageLabel,
-      status: 'processing',
-      targetLanguage: args.targetLanguage,
-      targetLanguageLabel: args.targetLanguageLabel,
-      updatedAt: timestamp,
-      videoId,
-      youtubeUrl: cleanUrl,
-    });
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const { videoId } = parseYouTubeUrl(args.youtubeUrl);
+    const apiKey = process.env.OPENROUTER_API_KEY;
+    const model =
+      process.env.OPENROUTER_TRANSLATION_MODEL ?? 'google/gemma-4-26b-a4b-it';
 
     try {
+      await ctx.runMutation(internal.entries.updateProgress, {
+        entryId: args.entryId,
+        processingStage: 'Checking the video and getting captions',
+        updatedAt: Date.now(),
+      });
+
       let transcriptText = args.transcriptText;
       let detectedLanguageCode = args.detectedLanguageCode ?? args.sourceLanguage;
 
@@ -249,32 +280,89 @@ export const transcribeVideo = action({
         throw new Error('No transcript was returned for this video.');
       }
 
-      const translationText = await translateTranscript({
-        sourceLanguageCode:
-          args.sourceLanguage === 'auto' ? detectedLanguageCode : args.sourceLanguage,
-        sourceLanguageLabel:
-          args.sourceLanguageLabel === 'Auto detect'
-            ? 'the transcript language'
-            : args.sourceLanguageLabel,
-        targetLanguageLabel: args.targetLanguageLabel,
-        targetLanguageCode: args.targetLanguage,
-        transcriptText,
+      await ctx.runMutation(internal.entries.updateProgress, {
+        entryId: args.entryId,
+        processingStage: `Translating to ${args.targetLanguageLabel}`,
+        updatedAt: Date.now(),
+      });
+
+      let translationText = transcriptText;
+      let translationStatus: 'failed' | 'ready' | 'skipped' = 'skipped';
+      let translationErrorMessage: string | undefined;
+
+      try {
+        translationText = await translateTranscript({
+          sourceLanguageCode:
+            args.sourceLanguage === 'auto' ? detectedLanguageCode : args.sourceLanguage,
+          sourceLanguageLabel:
+            args.sourceLanguageLabel === 'Auto detect'
+              ? 'the transcript language'
+              : args.sourceLanguageLabel,
+          targetLanguageLabel: args.targetLanguageLabel,
+          targetLanguageCode: args.targetLanguage,
+          transcriptText,
+        });
+        translationStatus = translationText === transcriptText ? 'skipped' : 'ready';
+      } catch (error) {
+        translationText = transcriptText;
+        translationStatus = 'failed';
+        translationErrorMessage =
+          error instanceof Error ? error.message : 'The translation step did not finish.';
+      }
+
+      const readerText =
+        translationStatus === 'ready' || translationStatus === 'skipped'
+          ? translationText
+          : transcriptText;
+      const readerLanguageLabel =
+        translationStatus === 'failed' ? args.sourceLanguageLabel : args.targetLanguageLabel;
+
+      let summaryText = buildFallbackSummary(readerText);
+      let chapters = buildFallbackChapters(readerText);
+
+      if (apiKey) {
+        await ctx.runMutation(internal.entries.updateProgress, {
+          entryId: args.entryId,
+          processingStage: 'Writing an easy summary and simple chapters',
+          updatedAt: Date.now(),
+        });
+        const provider = createOpenRouter({ apiKey });
+        const extras = await buildReaderExtras({
+          model,
+          provider,
+          readerLanguageLabel,
+          readerText,
+        });
+        summaryText = extras.summaryText;
+        chapters = extras.chapters;
+      }
+
+      await ctx.runMutation(internal.entries.updateProgress, {
+        entryId: args.entryId,
+        processingStage: 'Saving your reader',
+        updatedAt: Date.now(),
       });
 
       await ctx.runMutation(internal.entries.completeEntry, {
-        entryId,
+        chapters,
+        entryId: args.entryId,
+        processingStage: 'Ready to read',
+        summaryText,
         transcriptText,
+        translationErrorMessage,
+        translationStatus,
         translationText,
         updatedAt: Date.now(),
       });
     } catch (error) {
       await ctx.runMutation(internal.entries.failEntry, {
-        entryId,
+        entryId: args.entryId,
         errorMessage: error instanceof Error ? error.message : 'We could not transcribe this video.',
+        processingStage: 'We could not finish this video',
         updatedAt: Date.now(),
       });
     }
 
-    return entryId;
+    return null;
   },
 });

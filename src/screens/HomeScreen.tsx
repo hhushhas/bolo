@@ -1,6 +1,9 @@
-import { useState, useEffect, useDeferredValue } from 'react';
+import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
+  AppState,
+  Dimensions,
   Image,
   Linking,
   Pressable,
@@ -10,137 +13,155 @@ import {
   TextInput,
   View,
   useColorScheme,
-  Dimensions,
-  ActivityIndicator,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import {
-  defaultTargetLanguage,
-  getLanguageLabel,
-  languageOptions,
-} from '../constants/languages';
-import { palette, spacing } from '../constants/theme';
 import { LanguagePickerSheet } from '../components/LanguagePickerSheet';
+import { defaultTargetLanguage, getLanguageLabel, languageOptions } from '../constants/languages';
+import { palette, spacing } from '../constants/theme';
 import {
   buildWhatsAppShareUrl,
   fetchYouTubePreview,
+  getYouTubeThumbnailUrl,
   parseYouTubeUrl,
   type YouTubePreview,
 } from '../lib/youtube';
+import {
+  formatShareText,
+  getFriendlyFailureCopy,
+  languagePresets,
+} from '../lib/reader';
 import type { Doc } from '../../convex/_generated/dataModel';
 
 const { width } = Dimensions.get('window');
 const isSmallDevice = width < 375;
 
-const getFriendlyFailureCopy = (errorMessage?: string) => {
-  if (!errorMessage) {
-    return {
-      body: 'We could not turn this video into text this time.',
-      hint: 'Please try another video, or try this one again in a little while.',
-      title: 'We could not read this video yet',
-    };
+const getProcessingCopy = (entry: Doc<'entries'> | null) => {
+  if (!entry) {
+    return 'We are getting your reader ready.';
   }
 
-  const normalized = errorMessage.toLowerCase();
-
-  if (
-    normalized.includes('transcript is disabled') ||
-    normalized.includes('no transcript track was exposed') ||
-    normalized.includes('no transcripts are available')
-  ) {
-    return {
-      body: 'This YouTube video does not seem to offer captions we can read.',
-      hint: 'Please try a different video, or use a version of this video that has captions turned on.',
-      title: 'This video does not have readable captions',
-    };
-  }
-
-  if (normalized.includes('valid youtube video or shorts link')) {
-    return {
-      body: 'The link does not look like a full YouTube video link.',
-      hint: 'Please go back, copy the full link from YouTube, and paste it again.',
-      title: 'The link needs another look',
-    };
-  }
-
-  if (normalized.includes('video is no longer available')) {
-    return {
-      body: 'This video is not available to open right now.',
-      hint: 'Please try another video, or come back later if the video becomes available again.',
-      title: 'This video is not available right now',
-    };
-  }
-
-  if (normalized.includes('too many requests') || normalized.includes('captcha')) {
-    return {
-      body: 'YouTube is asking us to slow down for a moment.',
-      hint: 'Please wait a little and try again soon.',
-      title: 'YouTube is busy right now',
-    };
-  }
-
-  return {
-    body: 'Something went wrong while we were reading this video.',
-    hint: 'Please try again, or choose another video if this one keeps failing.',
-    title: 'We hit a small problem',
-  };
+  return entry.processingStage ?? 'We are getting your reader ready.';
 };
 
 export function HomeScreen({
   backendReady,
   entries,
   isWorking,
+  onToggleFavorite,
   onTranscribe,
 }: {
   backendReady: boolean;
   entries: Doc<'entries'>[];
   isWorking: boolean;
+  onToggleFavorite: (entryId: Doc<'entries'>['_id']) => Promise<void>;
   onTranscribe: (args: {
+    channelTitle?: string;
     sourceLanguage: string;
     sourceLanguageLabel: string;
     targetLanguage: string;
     targetLanguageLabel: string;
+    thumbnailUrl: string;
+    title: string;
+    videoId: string;
     youtubeUrl: string;
   }) => Promise<Doc<'entries'>['_id'] | null>;
 }) {
   const scheme = useColorScheme();
   const colors = palette[scheme === 'dark' ? 'dark' : 'light'];
-  
   const [url, setUrl] = useState('');
-  const [view, setView] = useState<'input' | 'reading' | 'history'>('input');
+  const [view, setView] = useState<'history' | 'input' | 'reading'>('input');
   const [selectedEntryId, setSelectedEntryId] = useState<Doc<'entries'>['_id'] | null>(null);
   const [preview, setPreview] = useState<YouTubePreview | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const [targetLanguage, setTargetLanguage] = useState<string>(defaultTargetLanguage.code);
   const [pickerVisible, setPickerVisible] = useState(false);
-
+  const [historyQuery, setHistoryQuery] = useState('');
+  const [readerMode, setReaderMode] = useState<'transcript' | 'translation'>('translation');
+  const [textSize, setTextSize] = useState(24);
+  const [wasAutoPasted, setWasAutoPasted] = useState(false);
   const deferredUrl = useDeferredValue(url);
+  const parsedUrl = parseYouTubeUrl(url);
+  const selectedEntry = entries.find((entry) => entry._id === selectedEntryId) ?? entries[0] ?? null;
   const targetLanguageOptions = languageOptions.filter((language) => language.code !== 'auto');
 
-  // Handle YouTube Preview Fetching
+  useEffect(() => {
+    if (!selectedEntryId && entries[0]) {
+      setSelectedEntryId(entries[0]._id);
+    }
+  }, [entries, selectedEntryId]);
+
+  useEffect(() => {
+    if (!selectedEntry) {
+      return;
+    }
+
+    if (selectedEntry.translationStatus === 'ready') {
+      setReaderMode('translation');
+      return;
+    }
+
+    setReaderMode('transcript');
+  }, [selectedEntry]);
+
+  useEffect(() => {
+    const checkClipboard = async () => {
+      if (url.trim()) {
+        return;
+      }
+
+      const content = await Clipboard.getStringAsync();
+      const parsed = parseYouTubeUrl(content);
+
+      if (!parsed || wasAutoPasted) {
+        return;
+      }
+
+      setUrl(parsed.cleanUrl);
+      setWasAutoPasted(true);
+    };
+
+    void checkClipboard();
+
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        void checkClipboard();
+      }
+    });
+
+    return () => subscription.remove();
+  }, [url, wasAutoPasted]);
+
   useEffect(() => {
     const parsed = parseYouTubeUrl(deferredUrl);
+
     if (!deferredUrl.trim() || !parsed) {
       setPreview(null);
+      setIsPreviewLoading(false);
       return;
     }
 
     let cancelled = false;
     const timeout = setTimeout(async () => {
       setIsPreviewLoading(true);
+
       try {
         const nextPreview = await fetchYouTubePreview(parsed.cleanUrl);
+
         if (!cancelled) {
           setPreview(nextPreview);
         }
       } catch {
-        if (!cancelled) setPreview(null);
+        if (!cancelled) {
+          setPreview(null);
+        }
       } finally {
-        if (!cancelled) setIsPreviewLoading(false);
+        if (!cancelled) {
+          setIsPreviewLoading(false);
+        }
       }
-    }, 500);
+    }, 350);
 
     return () => {
       cancelled = true;
@@ -148,63 +169,227 @@ export function HomeScreen({
     };
   }, [deferredUrl]);
 
-  const selectedEntry = entries.find((e) => e._id === selectedEntryId) || entries[0];
+  const filteredEntries = useMemo(() => {
+    const normalizedQuery = historyQuery.trim().toLowerCase();
+    const sorted = [...entries].sort((left, right) => {
+      if (left.favorite === right.favorite) {
+        return right.updatedAt - left.updatedAt;
+      }
 
-  const handleReadVideo = async () => {
-    const parsed = parseYouTubeUrl(url);
-    if (!parsed) {
-      Alert.alert('Check the Link', 'Please copy the link from YouTube and paste it in the box.');
+      return left.favorite ? -1 : 1;
+    });
+
+    if (!normalizedQuery) {
+      return sorted;
+    }
+
+    return sorted.filter((entry) =>
+      [entry.title, entry.channelTitle, entry.targetLanguageLabel]
+        .filter(Boolean)
+        .some((value) => value?.toLowerCase().includes(normalizedQuery)),
+    );
+  }, [entries, historyQuery]);
+
+  const currentReaderText =
+    readerMode === 'translation' && selectedEntry?.translationStatus === 'ready'
+      ? selectedEntry.translationText ?? selectedEntry.transcriptText ?? ''
+      : selectedEntry?.transcriptText ?? '';
+
+  const currentReaderLabel =
+    readerMode === 'translation' && selectedEntry?.translationStatus === 'ready'
+      ? `Translation • ${selectedEntry.targetLanguageLabel}`
+      : `Transcript • ${selectedEntry?.sourceLanguageLabel ?? 'Original'}`;
+
+  const isReaderReady = selectedEntry?.status === 'ready' && Boolean(selectedEntry.transcriptText);
+  const translationReady = selectedEntry?.translationStatus === 'ready';
+  const translationFailed = selectedEntry?.translationStatus === 'failed';
+  const failureCopy = getFriendlyFailureCopy(selectedEntry?.errorMessage);
+
+  const buildTranscribeArgs = (entryOverride?: Doc<'entries'> | null) => {
+    const nextParsed = entryOverride ? parseYouTubeUrl(entryOverride.youtubeUrl) : parsedUrl;
+
+    if (!nextParsed) {
+      return null;
+    }
+
+    const nextPreview =
+      entryOverride
+        ? {
+            authorName: entryOverride.channelTitle,
+            kind: 'video' as const,
+            thumbnailUrl: entryOverride.thumbnailUrl,
+            title: entryOverride.title,
+            url: entryOverride.youtubeUrl,
+            videoId: entryOverride.videoId,
+          }
+        : preview;
+
+    return {
+      channelTitle: nextPreview?.authorName,
+      sourceLanguage: 'auto',
+      sourceLanguageLabel: 'Automatic',
+      targetLanguage: entryOverride?.targetLanguage ?? targetLanguage,
+      targetLanguageLabel: entryOverride?.targetLanguageLabel ?? getLanguageLabel(targetLanguage),
+      thumbnailUrl:
+        nextPreview?.thumbnailUrl ?? getYouTubeThumbnailUrl(nextParsed.videoId),
+      title: nextPreview?.title ?? 'YouTube video',
+      videoId: nextParsed.videoId,
+      youtubeUrl: nextParsed.cleanUrl,
+    };
+  };
+
+  const handleReadVideo = async (entryOverride?: Doc<'entries'> | null) => {
+    const args = buildTranscribeArgs(entryOverride);
+
+    if (!args) {
+      Alert.alert('Check the link', 'Please copy the full YouTube video link and paste it here.');
       return;
     }
 
     if (!backendReady) {
-      Alert.alert('Almost Ready', 'We are setting up your reader. Please try again in a few seconds.');
+      Alert.alert('Almost ready', 'We are setting up your reader. Please try again in a few seconds.');
       return;
     }
 
-    try {
-      const entryId = await onTranscribe({
-        sourceLanguage: 'auto',
-        sourceLanguageLabel: 'Automatic',
-        targetLanguage,
-        targetLanguageLabel: getLanguageLabel(targetLanguage),
-        youtubeUrl: parsed.cleanUrl,
-      });
+    const entryId = await onTranscribe(args);
 
-      if (entryId) {
-        setSelectedEntryId(entryId);
-        setView('reading');
-      }
-    } catch {
-      Alert.alert('Sorry!', 'We couldn\'t read this video. Please try another one.');
+    if (entryId) {
+      setSelectedEntryId(entryId);
+      setView('reading');
     }
   };
 
-  const handleSelectHistory = (id: Doc<'entries'>['_id']) => {
-    setSelectedEntryId(id);
-    setView('reading');
+  const handleToggleFavorite = async (entryId: Doc<'entries'>['_id']) => {
+    await onToggleFavorite(entryId);
   };
 
-  // --- SUB-VIEWS ---
+  const handleShare = async (content: string, viewLabel: string) => {
+    if (!content) {
+      Alert.alert('Still working', 'Please wait until the text is ready.');
+      return;
+    }
+
+    const title = selectedEntry?.title ?? 'YouTube Reader';
+    await Linking.openURL(
+      buildWhatsAppShareUrl(
+        formatShareText({
+          content,
+          title,
+          viewLabel,
+        }),
+      ),
+    );
+  };
+
+  const handleCopy = async (content: string, label: string) => {
+    if (!content) {
+      Alert.alert('Still working', `Please wait until the ${label.toLowerCase()} is ready.`);
+      return;
+    }
+
+    await Clipboard.setStringAsync(content);
+    Alert.alert('Copied!', `${label} is ready to paste.`);
+  };
+
+  const renderFailureActions = () => {
+    if (!selectedEntry) {
+      return null;
+    }
+
+    return (
+      <View style={styles.inlineActions}>
+        <Pressable
+          onPress={() => handleReadVideo(selectedEntry)}
+          style={[styles.inlineActionButton, { backgroundColor: colors.accent, borderColor: colors.border }]}
+        >
+          <MaterialCommunityIcons color="#fff" name="refresh" size={18} />
+          <Text style={styles.inlineActionText}>Try Again</Text>
+        </Pressable>
+      </View>
+    );
+  };
+
+  const renderReaderModes = () => {
+    if (!selectedEntry) {
+      return null;
+    }
+
+    return (
+      <View style={styles.modeRow}>
+        <Pressable
+          onPress={() => setReaderMode('translation')}
+          style={[
+            styles.modeChip,
+            {
+              backgroundColor: readerMode === 'translation' ? colors.accent : colors.surface,
+              borderColor: readerMode === 'translation' ? colors.accent : colors.border,
+              opacity: translationReady ? 1 : 0.45,
+            },
+          ]}
+        >
+          <Text style={[styles.modeChipText, { color: readerMode === 'translation' ? colors.reader : colors.text }]}>
+            Translation
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={() => setReaderMode('transcript')}
+          style={[
+            styles.modeChip,
+            {
+              backgroundColor: readerMode === 'transcript' ? colors.accent : colors.surface,
+              borderColor: readerMode === 'transcript' ? colors.accent : colors.border,
+            },
+          ]}
+        >
+          <Text style={[styles.modeChipText, { color: readerMode === 'transcript' ? colors.reader : colors.text }]}>
+            Transcript
+          </Text>
+        </Pressable>
+      </View>
+    );
+  };
 
   const renderReadingView = () => {
-    if (!selectedEntry) return null;
+    if (!selectedEntry) {
+      return null;
+    }
 
-    const selectedText = selectedEntry.translationText || selectedEntry.transcriptText || '';
-    const isReady = selectedEntry.status === 'ready' && Boolean(selectedText);
-    const isFailed = selectedEntry.status === 'failed';
-    const failureCopy = getFriendlyFailureCopy(selectedEntry.errorMessage);
+    const stageText = getProcessingCopy(selectedEntry);
 
     return (
       <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
         <View style={[styles.header, { borderBottomWidth: 3, borderColor: colors.border }]}>
           <Pressable onPress={() => setView('input')} style={styles.backButton}>
-            <MaterialCommunityIcons name="chevron-left" size={38} color={colors.text} />
+            <MaterialCommunityIcons name="chevron-left" size={34} color={colors.text} />
             <Text style={[styles.backText, { color: colors.text }]}>Back</Text>
           </Pressable>
-          <Text style={[styles.headerTitle, { color: colors.text }]}>Reading Mode</Text>
+
+          <View style={styles.readerHeaderTools}>
+            <Pressable
+              onPress={() => setTextSize((current) => Math.max(18, current - 2))}
+              style={[styles.glassBtn, { borderColor: colors.border }]}
+            >
+              <Text style={[styles.glassBtnText, { color: colors.text }]}>A-</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => setTextSize((current) => Math.min(36, current + 2))}
+              style={[styles.glassBtn, { borderColor: colors.border }]}
+            >
+              <Text style={[styles.glassBtnText, { color: colors.text }]}>A+</Text>
+            </Pressable>
+            <Pressable
+              onPress={() => handleToggleFavorite(selectedEntry._id)}
+              style={[styles.favoriteIconButton, { borderColor: colors.border }]}
+            >
+              <MaterialCommunityIcons
+                color={selectedEntry.favorite ? colors.accent : colors.textSoft}
+                name={selectedEntry.favorite ? 'star' : 'star-outline'}
+                size={22}
+              />
+            </Pressable>
+          </View>
         </View>
-        
+
         <View style={styles.readingContainer}>
           <ScrollView contentContainerStyle={styles.readingContent} showsVerticalScrollIndicator={false}>
             <View style={styles.bookWrapper}>
@@ -212,7 +397,7 @@ export function HomeScreen({
                 <Image source={{ uri: selectedEntry.thumbnailUrl }} style={styles.readingPreviewThumb} />
                 <View style={styles.readingPreviewInfo}>
                   <Text style={[styles.previewBadge, { color: colors.accent }]}>
-                    {isFailed ? 'Could not transcribe' : isReady ? 'Ready to read' : 'Preparing transcript'}
+                    {selectedEntry.status === 'failed' ? 'Needs another try' : stageText}
                   </Text>
                   <Text numberOfLines={3} style={[styles.readingPreviewTitle, { color: colors.text }]}>
                     {selectedEntry.title}
@@ -223,86 +408,126 @@ export function HomeScreen({
                 </View>
               </View>
 
-              <Text style={[styles.videoTitle, { color: colors.text }]}>{selectedEntry.title}</Text>
+              <View style={styles.metaRow}>
+                <View style={[styles.metaBadge, { backgroundColor: colors.backgroundAccent, borderColor: colors.border }]}>
+                  <Text style={[styles.metaBadgeText, { color: colors.text }]}>
+                    {selectedEntry.targetLanguageLabel}
+                  </Text>
+                </View>
+                <View style={[styles.metaBadge, { backgroundColor: colors.backgroundAccent, borderColor: colors.border }]}>
+                  <Text style={[styles.metaBadgeText, { color: colors.text }]}>
+                    {selectedEntry.favorite ? 'Saved favorite' : 'Saved in history'}
+                  </Text>
+                </View>
+              </View>
+
+              {renderReaderModes()}
+
+              {translationFailed ? (
+                <View style={[styles.noticeCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                  <MaterialCommunityIcons color={colors.info} name="information-outline" size={20} />
+                  <Text style={[styles.noticeText, { color: colors.text }]}>
+                    Translation could not finish, so we kept the original transcript ready for reading.
+                  </Text>
+                </View>
+              ) : null}
+
               <View style={[styles.textContainer, { backgroundColor: colors.reader, borderColor: colors.border }]}>
-                {isFailed ? (
+                {selectedEntry.status === 'failed' ? (
                   <View style={styles.statusWrap}>
                     <MaterialCommunityIcons name="alert-circle-outline" size={36} color={colors.danger} />
                     <Text style={[styles.statusTitle, { color: colors.danger }]}>{failureCopy.title}</Text>
-                    <Text style={[styles.statusText, { color: colors.text }]}>
-                      {failureCopy.body}
-                    </Text>
-                    <Text style={[styles.statusHint, { color: colors.textSoft }]}>
-                      {failureCopy.hint}
-                    </Text>
+                    <Text style={[styles.statusText, { color: colors.text }]}>{failureCopy.body}</Text>
+                    <Text style={[styles.statusHint, { color: colors.textSoft }]}>{failureCopy.hint}</Text>
+                    {renderFailureActions()}
                   </View>
-                ) : isReady ? (
-                  <Text selectable style={[styles.transcriptText, { color: colors.text }]}>
-                    {selectedText}
-                  </Text>
-                ) : (
+                ) : !isReaderReady ? (
                   <View style={styles.statusWrap}>
                     <ActivityIndicator size="large" color={colors.accent} />
-                    <Text style={[styles.statusTitle, { color: colors.text }]}>Preparing your transcript</Text>
-                    <Text style={[styles.statusText, { color: colors.textSoft }]}>
-                      Stay on this screen for a few seconds. The text will appear here as soon as it is ready.
-                    </Text>
+                    <Text style={[styles.statusTitle, { color: colors.text }]}>Preparing your reader</Text>
+                    <Text style={[styles.statusText, { color: colors.textSoft }]}>{stageText}</Text>
                   </View>
+                ) : (
+                  <Text
+                    selectable
+                    style={[
+                      styles.transcriptText,
+                      { color: colors.text, fontSize: textSize, lineHeight: textSize * 1.55 },
+                    ]}
+                  >
+                    {currentReaderText}
+                  </Text>
                 )}
               </View>
+
+              {selectedEntry.summaryText ? (
+                <View style={[styles.extraCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                  <Text style={[styles.extraTitle, { color: colors.text }]}>Easy Summary</Text>
+                  <Text style={[styles.extraBody, { color: colors.text }]}>{selectedEntry.summaryText}</Text>
+                </View>
+              ) : null}
+
+              {selectedEntry.chapters?.length ? (
+                <View style={styles.chaptersBlock}>
+                  <Text style={[styles.blockTitle, { color: colors.text }]}>Simple Chapters</Text>
+                  {selectedEntry.chapters.map((chapter, index) => (
+                    <View
+                      key={`${selectedEntry._id}-chapter-${index + 1}`}
+                      style={[styles.chapterCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
+                    >
+                      <Text style={[styles.chapterTitle, { color: colors.text }]}>
+                        {index + 1}. {chapter.title}
+                      </Text>
+                      <Text style={[styles.chapterSummary, { color: colors.textSoft }]}>
+                        {chapter.summary}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
             </View>
-            {/* Added bottom padding so text can be scrolled fully above the sticky bar */}
-            <View style={{ height: 180 }} />
+
+            <View style={styles.readerBottomPad} />
           </ScrollView>
 
-          <View style={[styles.stickyToolbelt, { backgroundColor: colors.background, borderTopWidth: 3, borderColor: colors.border }]}>
-            <Text style={[styles.toolbeltLabel, { color: colors.textSoft }]}>READY TO SHARE?</Text>
+          <View
+            style={[
+              styles.stickyToolbelt,
+              { backgroundColor: colors.background, borderTopWidth: 3, borderColor: colors.border },
+            ]}
+          >
+            <Text style={[styles.toolbeltLabel, { color: colors.textSoft }]}>Copy or share what you need</Text>
             <View style={styles.toolbeltRow}>
-              <Pressable 
-                onPress={() => {
-                  if (!isReady) {
-                    if (isFailed) {
-                      Alert.alert(failureCopy.title, `${failureCopy.body}\n\n${failureCopy.hint}`);
-                      return;
-                    }
-
-                    Alert.alert('Still working', 'Please wait a little longer while we prepare the text.');
-                    return;
-                  }
-                  Linking.openURL(buildWhatsAppShareUrl(`Check out this video: ${selectedEntry.title}\n\n${selectedText}`));
-                }}
-                style={({ pressed }) => [
-                  styles.toolButton, 
-                  { backgroundColor: colors.info, borderColor: colors.border, top: pressed ? 4 : 0 }
-                ]}
+              <Pressable
+                onPress={() => handleShare(currentReaderText, currentReaderLabel)}
+                style={[styles.toolButton, { backgroundColor: colors.info, borderColor: colors.border }]}
               >
-                <MaterialCommunityIcons name="whatsapp" size={32} color="#FFF" />
-                <Text style={styles.toolButtonText}>WhatsApp</Text>
-                <View style={[styles.toolShadow, { backgroundColor: colors.border }]} />
+                <MaterialCommunityIcons name="whatsapp" size={24} color="#FFF" />
+                <Text style={styles.toolButtonText}>Share Current</Text>
               </Pressable>
-              
-              <Pressable 
-                onPress={async () => {
-                  if (!isReady) {
-                    if (isFailed) {
-                      Alert.alert(failureCopy.title, `${failureCopy.body}\n\n${failureCopy.hint}`);
-                      return;
-                    }
 
-                    Alert.alert('Still working', 'Please wait a little longer while we prepare the text.');
-                    return;
-                  }
-                  await Clipboard.setStringAsync(selectedText);
-                  Alert.alert('Copied!', 'The text is ready to paste anywhere.');
-                }}
-                style={({ pressed }) => [
-                  styles.toolButton, 
-                  { backgroundColor: colors.accent, borderColor: colors.border, top: pressed ? 4 : 0 }
-                ]}
+              <Pressable
+                onPress={() => handleCopy(currentReaderText, currentReaderLabel)}
+                style={[styles.toolButton, { backgroundColor: colors.accent, borderColor: colors.border }]}
               >
-                <MaterialCommunityIcons name="content-copy" size={32} color="#FFF" />
-                <Text style={styles.toolButtonText}>Copy Text</Text>
-                <View style={[styles.toolShadow, { backgroundColor: colors.border }]} />
+                <MaterialCommunityIcons name="content-copy" size={24} color="#FFF" />
+                <Text style={styles.toolButtonText}>Copy Current</Text>
+              </Pressable>
+            </View>
+
+            <View style={styles.toolbeltRow}>
+              <Pressable
+                onPress={() => handleCopy(selectedEntry.transcriptText ?? '', 'Transcript')}
+                style={[styles.secondaryToolButton, { backgroundColor: colors.surface, borderColor: colors.border }]}
+              >
+                <Text style={[styles.secondaryToolButtonText, { color: colors.text }]}>Copy Transcript</Text>
+              </Pressable>
+
+              <Pressable
+                onPress={() => handleCopy(selectedEntry.translationText ?? '', 'Translation')}
+                style={[styles.secondaryToolButton, { backgroundColor: colors.surface, borderColor: colors.border, opacity: translationReady ? 1 : 0.45 }]}
+              >
+                <Text style={[styles.secondaryToolButtonText, { color: colors.text }]}>Copy Translation</Text>
               </Pressable>
             </View>
           </View>
@@ -315,38 +540,74 @@ export function HomeScreen({
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
       <View style={[styles.header, { borderBottomWidth: 3, borderColor: colors.border }]}>
         <Pressable onPress={() => setView('input')} style={styles.backButton}>
-          <MaterialCommunityIcons name="chevron-left" size={38} color={colors.text} />
+          <MaterialCommunityIcons name="chevron-left" size={34} color={colors.text} />
           <Text style={[styles.backText, { color: colors.text }]}>Back</Text>
         </Pressable>
-        <Text style={[styles.headerTitle, { color: colors.text }]}>My History</Text>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>History</Text>
       </View>
+
       <ScrollView contentContainerStyle={styles.historyContent} showsVerticalScrollIndicator={false}>
-        {entries.length === 0 ? (
+        <TextInput
+          autoCorrect={false}
+          onChangeText={setHistoryQuery}
+          placeholder="Search your saved videos..."
+          placeholderTextColor={colors.textSoft}
+          style={[
+            styles.historySearch,
+            {
+              backgroundColor: colors.surface,
+              borderColor: colors.border,
+              color: colors.text,
+            },
+          ]}
+          value={historyQuery}
+        />
+
+        {filteredEntries.length === 0 ? (
           <View style={styles.emptyContainer}>
-            <MaterialCommunityIcons name="book-open-outline" size={80} color={colors.textSoft} />
-            <Text style={[styles.emptyText, { color: colors.textSoft }]}>Your library is empty.</Text>
-            <Text style={[styles.emptySubtext, { color: colors.textSoft }]}>Videos you read will appear here.</Text>
+            <MaterialCommunityIcons name="book-open-outline" size={72} color={colors.textSoft} />
+            <Text style={[styles.emptyText, { color: colors.textSoft }]}>Nothing matches that search yet.</Text>
           </View>
         ) : (
-          entries.map((entry) => (
-            <Pressable 
-              key={entry._id} 
-              onPress={() => handleSelectHistory(entry._id)}
-              style={({ pressed }) => [
-                styles.historyItem, 
-                { 
-                  backgroundColor: pressed ? colors.backgroundAccent : colors.surface, 
-                  borderColor: colors.border 
-                }
+          filteredEntries.map((entry) => (
+            <Pressable
+              key={entry._id}
+              onPress={() => {
+                setSelectedEntryId(entry._id);
+                setView('reading');
+              }}
+              style={[
+                styles.historyItem,
+                { backgroundColor: colors.surface, borderColor: colors.border },
               ]}
             >
               <View style={styles.historyItemContent}>
-                <Text numberOfLines={2} style={[styles.historyItemTitle, { color: colors.text }]}>{entry.title}</Text>
-                <Text style={[styles.historyItemDate, { color: colors.textSoft }]}>
-                  {entry.sourceLanguageLabel} to {entry.targetLanguageLabel}
-                </Text>
+                <View style={styles.historyTopRow}>
+                  <Text numberOfLines={2} style={[styles.historyItemTitle, { color: colors.text }]}>
+                    {entry.title}
+                  </Text>
+                  <Pressable onPress={() => handleToggleFavorite(entry._id)} style={styles.historyStarButton}>
+                    <MaterialCommunityIcons
+                      color={entry.favorite ? colors.accent : colors.textSoft}
+                      name={entry.favorite ? 'star' : 'star-outline'}
+                      size={22}
+                    />
+                  </Pressable>
+                </View>
+
+                <View style={styles.historyBadges}>
+                  <View style={[styles.historyBadge, { backgroundColor: colors.backgroundAccent, borderColor: colors.border }]}>
+                    <Text style={[styles.historyBadgeText, { color: colors.text }]}>
+                      {entry.targetLanguageLabel}
+                    </Text>
+                  </View>
+                  <View style={[styles.historyBadge, { backgroundColor: colors.backgroundAccent, borderColor: colors.border }]}>
+                    <Text style={[styles.historyBadgeText, { color: colors.text }]}>
+                      {entry.status}
+                    </Text>
+                  </View>
+                </View>
               </View>
-              <MaterialCommunityIcons name="arrow-right-circle" size={32} color={colors.accent} />
             </Pressable>
           ))
         )}
@@ -354,20 +615,55 @@ export function HomeScreen({
     </SafeAreaView>
   );
 
-  if (view === 'reading') return renderReadingView();
-  if (view === 'history') return renderHistoryView();
+  if (view === 'reading') {
+    return renderReadingView();
+  }
+
+  if (view === 'history') {
+    return renderHistoryView();
+  }
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
       <ScrollView contentContainerStyle={styles.container} showsVerticalScrollIndicator={false}>
         <View style={styles.hero}>
-          <View style={[styles.iconContainer, { backgroundColor: colors.backgroundAccent, borderColor: colors.border }]}>
+          <View
+            style={[
+              styles.iconContainer,
+              { backgroundColor: colors.backgroundAccent, borderColor: colors.border },
+            ]}
+          >
             <MaterialCommunityIcons name="book-open-page-variant" size={42} color={colors.accent} />
           </View>
           <Text style={[styles.title, { color: colors.text }]}>YouTube Reader</Text>
           <Text style={[styles.subtitle, { color: colors.textSoft }]}>
-            We will turn any video into a large-print book for you to read easily.
+            Paste a YouTube link, choose the language, and we will make an easy reader for you.
           </Text>
+        </View>
+
+        <View style={[styles.presetRow, { borderColor: colors.border }]}>
+          {languagePresets.map((preset) => {
+            const selected = preset.code === targetLanguage;
+
+            return (
+              <Pressable
+                key={preset.code}
+                onPress={() => setTargetLanguage(preset.code)}
+                style={[
+                  styles.presetButton,
+                  {
+                    backgroundColor: selected ? colors.accent : colors.surface,
+                    borderColor: selected ? colors.accent : colors.border,
+                  },
+                ]}
+              >
+                <Text style={styles.presetFlag}>{preset.flag}</Text>
+                <Text style={[styles.presetLabel, { color: selected ? colors.reader : colors.text }]}>
+                  {preset.label}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
 
         <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
@@ -377,46 +673,56 @@ export function HomeScreen({
             </View>
             <Text style={[styles.label, { color: colors.background }]}>Paste Link Below</Text>
           </View>
-          
+
           <View style={styles.cardBody}>
             <TextInput
-              style={[styles.mainInput, { 
-                backgroundColor: colors.backgroundAccent, 
-                borderColor: colors.border,
-                color: colors.text 
-              }]}
-              placeholder="Tap here and paste link..."
-              placeholderTextColor={colors.textSoft}
-              value={url}
-              onChangeText={setUrl}
               autoCapitalize="none"
               autoCorrect={false}
+              onChangeText={setUrl}
+              placeholder="Tap here and paste a YouTube link..."
+              placeholderTextColor={colors.textSoft}
+              style={[
+                styles.mainInput,
+                {
+                  backgroundColor: colors.backgroundAccent,
+                  borderColor: colors.border,
+                  color: colors.text,
+                },
+              ]}
+              value={url}
             />
 
-            {/* Video Preview Logic */}
             {isPreviewLoading ? (
               <View style={styles.previewPlaceholder}>
-                <ActivityIndicator size="large" color={colors.accent} />
-                <Text style={[styles.previewPlaceholderText, { color: colors.textSoft }]}>Checking video...</Text>
+                <ActivityIndicator color={colors.accent} size="large" />
+                <Text style={[styles.previewPlaceholderText, { color: colors.textSoft }]}>
+                  Checking the video...
+                </Text>
               </View>
             ) : preview ? (
-              <View style={[styles.previewCard, { borderColor: colors.border, backgroundColor: colors.backgroundAccent }]}>
+              <View
+                style={[
+                  styles.previewCard,
+                  { borderColor: colors.border, backgroundColor: colors.backgroundAccent },
+                ]}
+              >
                 <Image source={{ uri: preview.thumbnailUrl }} style={styles.previewThumb} />
                 <View style={styles.previewInfo}>
-                  <Text numberOfLines={2} style={[styles.previewTitle, { color: colors.text }]}>{preview.title}</Text>
-                  <Text style={[styles.previewAuthor, { color: colors.textSoft }]}>{preview.authorName}</Text>
+                  <Text numberOfLines={2} style={[styles.previewTitle, { color: colors.text }]}>
+                    {preview.title}
+                  </Text>
+                  <Text style={[styles.previewAuthor, { color: colors.textSoft }]}>
+                    {preview.authorName ?? 'YouTube'}
+                  </Text>
                 </View>
               </View>
             ) : null}
 
             <Pressable
               onPress={() => setPickerVisible(true)}
-              style={({ pressed }) => [
+              style={[
                 styles.languageCard,
-                {
-                  backgroundColor: pressed ? colors.surfaceStrong : colors.backgroundAccent,
-                  borderColor: colors.border,
-                },
+                { backgroundColor: colors.backgroundAccent, borderColor: colors.border },
               ]}
             >
               <View style={styles.languageCardCopy}>
@@ -429,23 +735,21 @@ export function HomeScreen({
             </Pressable>
 
             <View style={styles.buttonContainer}>
-              <Pressable 
-                onPress={handleReadVideo}
+              <Pressable
                 disabled={isWorking}
-                style={({ pressed }) => [
-                  styles.bigButton, 
-                  { 
+                onPress={() => handleReadVideo(null)}
+                style={[
+                  styles.bigButton,
+                  {
                     backgroundColor: isWorking ? colors.textSoft : colors.accent,
                     borderColor: colors.border,
-                    opacity: pressed ? 0.9 : 1,
-                    top: pressed ? 4 : 0,
-                  }
+                  },
                 ]}
               >
                 <View style={styles.buttonContent}>
-                  {isWorking && <ActivityIndicator size="small" color="#FFF" style={{ marginRight: 8 }} />}
+                  {isWorking ? <ActivityIndicator color="#fff" size="small" /> : null}
                   <Text style={styles.bigButtonText}>
-                    {isWorking ? 'Reading Video...' : '2. Read the Video'}
+                    {isWorking ? 'Starting Reader...' : '2. Read the Video'}
                   </Text>
                 </View>
               </Pressable>
@@ -455,21 +759,19 @@ export function HomeScreen({
         </View>
 
         <View style={styles.footer}>
-          <Pressable 
+          <Pressable
             onPress={() => setView('history')}
-            style={({ pressed }) => [
-              styles.secondaryButton, 
-              { 
-                borderColor: colors.border,
-                backgroundColor: pressed ? colors.backgroundAccent : colors.background
-              }
+            style={[
+              styles.secondaryButton,
+              { borderColor: colors.border, backgroundColor: colors.background },
             ]}
           >
-            <MaterialCommunityIcons name="history" size={24} color={colors.text} />
+            <MaterialCommunityIcons color={colors.text} name="history" size={24} />
             <Text style={[styles.secondaryButtonText, { color: colors.text }]}>View my old videos</Text>
           </Pressable>
         </View>
       </ScrollView>
+
       <LanguagePickerSheet
         colors={colors}
         onClose={() => setPickerVisible(false)}
@@ -484,139 +786,238 @@ export function HomeScreen({
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
+  backButton: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 4,
+  },
+  backText: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  bigButton: {
+    alignItems: 'center',
+    borderRadius: 16,
+    borderWidth: 3,
+    height: 86,
+    justifyContent: 'center',
+    position: 'absolute',
+    width: '100%',
+    zIndex: 1,
+  },
+  bigButtonText: {
+    color: '#FFFFFF',
+    fontSize: 28,
+    fontWeight: '900',
+    letterSpacing: 1,
+  },
+  blockTitle: {
+    fontSize: 24,
+    fontWeight: '900',
+  },
+  bookWrapper: {
+    gap: spacing.md,
+  },
+  buttonContainer: {
+    height: 100,
+    marginTop: spacing.xs,
+    position: 'relative',
+  },
+  buttonContent: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
+  buttonShadow: {
+    borderRadius: 16,
+    height: 86,
+    position: 'absolute',
+    top: 8,
+    width: '100%',
+  },
+  card: {
+    borderRadius: 24,
+    borderWidth: 3,
+    overflow: 'hidden',
+  },
+  cardBody: {
+    gap: spacing.md,
+    padding: spacing.lg,
+  },
+  cardHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.sm,
+    padding: spacing.md,
+  },
+  chapterCard: {
+    borderRadius: 18,
+    borderWidth: 2,
+    gap: spacing.xs,
+    padding: spacing.md,
+  },
+  chapterSummary: {
+    fontSize: 17,
+    lineHeight: 25,
+  },
+  chapterTitle: {
+    fontSize: 19,
+    fontWeight: '800',
+    lineHeight: 26,
+  },
+  chaptersBlock: {
+    gap: spacing.sm,
   },
   container: {
-    padding: spacing.md,
     flexGrow: 1,
-    paddingTop: spacing.xl,
+    padding: spacing.md,
     paddingBottom: spacing.xl,
+    paddingTop: spacing.xl,
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    gap: spacing.sm,
+    justifyContent: 'center',
+    paddingVertical: 100,
+  },
+  emptyText: {
+    fontSize: 24,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  extraBody: {
+    fontSize: 18,
+    lineHeight: 28,
+  },
+  extraCard: {
+    borderRadius: 20,
+    borderWidth: 2,
+    gap: spacing.sm,
+    padding: spacing.md,
+  },
+  extraTitle: {
+    fontSize: 22,
+    fontWeight: '800',
+  },
+  favoriteIconButton: {
+    alignItems: 'center',
+    borderRadius: 999,
+    borderWidth: 2,
+    height: 42,
+    justifyContent: 'center',
+    width: 42,
+  },
+  footer: {
+    alignItems: 'center',
+    marginTop: spacing.xl,
+  },
+  glassBtn: {
+    alignItems: 'center',
+    borderRadius: 999,
+    borderWidth: 2,
+    height: 42,
+    justifyContent: 'center',
+    width: 42,
+  },
+  glassBtnText: {
+    fontSize: 16,
+    fontWeight: '800',
   },
   header: {
-    flexDirection: 'row',
     alignItems: 'center',
-    padding: spacing.md,
+    flexDirection: 'row',
     justifyContent: 'space-between',
+    padding: spacing.md,
   },
   headerTitle: {
     fontSize: 20,
     fontWeight: '800',
     textTransform: 'uppercase',
   },
-  backButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  backText: {
-    fontSize: 20,
-    fontWeight: '700',
-  },
   hero: {
-    marginBottom: spacing.xl,
     alignItems: 'center',
     gap: spacing.sm,
+    marginBottom: spacing.xl,
   },
-  iconContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 24,
+  historyBadge: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  historyBadgeText: {
+    fontSize: 12,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  historyBadges: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+  },
+  historyContent: {
+    gap: spacing.md,
+    padding: spacing.md,
+  },
+  historyItem: {
+    borderRadius: 20,
     borderWidth: 3,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: spacing.xs,
-    transform: [{ rotate: '-4deg' }],
+    padding: spacing.md,
   },
-  title: {
-    fontSize: isSmallDevice ? 32 : 44,
-    fontWeight: '900',
-    textAlign: 'center',
-    letterSpacing: -1,
+  historyItemContent: {
+    gap: spacing.sm,
   },
-  subtitle: {
-    fontSize: isSmallDevice ? 18 : 22,
-    textAlign: 'center',
-    lineHeight: 30,
+  historyItemTitle: {
+    flex: 1,
+    fontSize: 20,
+    fontWeight: '800',
+    lineHeight: 27,
+  },
+  historySearch: {
+    borderRadius: 16,
+    borderWidth: 3,
+    fontSize: 18,
+    minHeight: 62,
     paddingHorizontal: spacing.md,
   },
-  card: {
+  historyStarButton: {
+    paddingLeft: spacing.sm,
+  },
+  historyTopRow: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+  },
+  iconContainer: {
+    alignItems: 'center',
     borderRadius: 24,
     borderWidth: 3,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.1,
-    shadowRadius: 10,
-    elevation: 5,
-  },
-  cardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: spacing.md,
-    gap: spacing.sm,
-  },
-  cardBody: {
-    padding: spacing.lg,
-    gap: spacing.md,
-  },
-  stepNumber: {
-    width: 32,
-    height: 32,
-    borderRadius: 8,
+    height: 80,
     justifyContent: 'center',
-    alignItems: 'center',
+    marginBottom: spacing.xs,
+    transform: [{ rotate: '-4deg' }],
+    width: 80,
   },
-  stepNumberText: {
-    color: '#FFF',
-    fontSize: 18,
-    fontWeight: '900',
+  inlineActionButton: {
+    alignItems: 'center',
+    borderRadius: 14,
+    borderWidth: 2,
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
+    minHeight: 50,
+    paddingHorizontal: spacing.md,
+  },
+  inlineActionText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  inlineActions: {
+    marginTop: spacing.sm,
   },
   label: {
     fontSize: 22,
     fontWeight: '800',
-  },
-  mainInput: {
-    borderWidth: 3,
-    borderRadius: 16,
-    padding: spacing.md,
-    fontSize: 20,
-    minHeight: 70,
-  },
-  previewPlaceholder: {
-    height: 100,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 8,
-  },
-  previewPlaceholderText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  previewCard: {
-    borderRadius: 16,
-    borderWidth: 2,
-    overflow: 'hidden',
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: spacing.sm,
-    gap: spacing.sm,
-  },
-  previewThumb: {
-    width: 80,
-    height: 60,
-    borderRadius: 8,
-  },
-  previewInfo: {
-    flex: 1,
-    gap: 2,
-  },
-  previewTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  previewAuthor: {
-    fontSize: 14,
-    fontWeight: '600',
   },
   languageCard: {
     alignItems: 'center',
@@ -640,60 +1041,83 @@ const styles = StyleSheet.create({
     fontSize: 22,
     fontWeight: '800',
   },
-  buttonContainer: {
-    marginTop: spacing.xs,
-    position: 'relative',
-    height: 100,
-  },
-  bigButton: {
-    height: 86,
+  mainInput: {
     borderRadius: 16,
     borderWidth: 3,
-    justifyContent: 'center',
-    alignItems: 'center',
-    zIndex: 1,
-    position: 'absolute',
-    width: '100%',
+    fontSize: 20,
+    minHeight: 70,
+    padding: spacing.md,
   },
-  buttonContent: {
+  metaBadge: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  metaBadgeText: {
+    fontSize: 13,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  metaRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
   },
-  buttonShadow: {
-    height: 86,
-    borderRadius: 16,
-    position: 'absolute',
-    width: '100%',
-    top: 8,
+  modeChip: {
+    borderRadius: 999,
+    borderWidth: 2,
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: spacing.md,
   },
-  bigButtonText: {
-    color: '#FFFFFF',
-    fontSize: 28,
-    fontWeight: '900',
-    letterSpacing: 1,
+  modeChipText: {
+    fontSize: 15,
+    fontWeight: '800',
   },
-  readingContainer: {
-    flex: 1,
+  modeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
   },
-  readingContent: {
-    padding: spacing.md,
-    paddingBottom: spacing.xl,
-  },
-  bookWrapper: {
-    gap: spacing.md,
-  },
-  readingPreviewCard: {
+  noticeCard: {
+    alignItems: 'flex-start',
     borderRadius: 18,
-    borderWidth: 3,
-    overflow: 'hidden',
-  },
-  readingPreviewThumb: {
-    aspectRatio: 16 / 9,
-    width: '100%',
-  },
-  readingPreviewInfo: {
-    gap: 4,
+    borderWidth: 2,
+    flexDirection: 'row',
+    gap: spacing.sm,
     padding: spacing.md,
+  },
+  noticeText: {
+    flex: 1,
+    fontSize: 16,
+    lineHeight: 24,
+  },
+  presetButton: {
+    alignItems: 'center',
+    borderRadius: 16,
+    borderWidth: 2,
+    flex: 1,
+    gap: 6,
+    justifyContent: 'center',
+    minHeight: 68,
+    paddingHorizontal: 8,
+  },
+  presetFlag: {
+    fontSize: 20,
+  },
+  presetLabel: {
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  presetRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
+  },
+  previewAuthor: {
+    fontSize: 14,
+    fontWeight: '600',
   },
   previewBadge: {
     fontSize: 13,
@@ -701,31 +1125,102 @@ const styles = StyleSheet.create({
     letterSpacing: 0.4,
     textTransform: 'uppercase',
   },
+  previewCard: {
+    alignItems: 'center',
+    borderRadius: 16,
+    borderWidth: 2,
+    flexDirection: 'row',
+    gap: spacing.sm,
+    overflow: 'hidden',
+    padding: spacing.sm,
+  },
+  previewInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  previewPlaceholder: {
+    alignItems: 'center',
+    gap: 8,
+    height: 100,
+    justifyContent: 'center',
+  },
+  previewPlaceholderText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  previewThumb: {
+    borderRadius: 8,
+    height: 60,
+    width: 80,
+  },
+  previewTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  readerBottomPad: {
+    height: 220,
+  },
+  readerHeaderTools: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
+  readingContainer: {
+    flex: 1,
+  },
+  readingContent: {
+    padding: spacing.md,
+  },
+  readingPreviewCard: {
+    borderRadius: 18,
+    borderWidth: 3,
+    overflow: 'hidden',
+  },
+  readingPreviewInfo: {
+    gap: 4,
+    padding: spacing.md,
+  },
+  readingPreviewThumb: {
+    aspectRatio: 16 / 9,
+    width: '100%',
+  },
   readingPreviewTitle: {
     fontSize: 20,
     fontWeight: '800',
     lineHeight: 28,
   },
-  videoTitle: {
-    fontSize: 28,
-    fontWeight: '900',
-    lineHeight: 36,
-  },
-  textContainer: {
-    padding: spacing.lg,
-    borderRadius: 20,
-    borderWidth: 3,
-    minHeight: 400,
-  },
-  statusWrap: {
-    alignItems: 'center',
+  safeArea: {
     flex: 1,
-    gap: spacing.sm,
-    justifyContent: 'center',
   },
-  statusTitle: {
-    fontSize: 24,
+  secondaryButton: {
+    alignItems: 'center',
+    borderRadius: 16,
+    borderWidth: 3,
+    flexDirection: 'row',
+    gap: spacing.sm,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: spacing.sm,
+  },
+  secondaryButtonText: {
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  secondaryToolButton: {
+    alignItems: 'center',
+    borderRadius: 14,
+    borderWidth: 2,
+    flex: 1,
+    justifyContent: 'center',
+    minHeight: 52,
+    paddingHorizontal: spacing.sm,
+  },
+  secondaryToolButtonText: {
+    fontSize: 15,
     fontWeight: '800',
+  },
+  statusHint: {
+    fontSize: 18,
+    lineHeight: 28,
     textAlign: 'center',
   },
   statusText: {
@@ -733,113 +1228,80 @@ const styles = StyleSheet.create({
     lineHeight: 30,
     textAlign: 'center',
   },
-  statusHint: {
-    fontSize: 18,
-    lineHeight: 28,
-    textAlign: 'center',
-  },
-  transcriptText: {
+  statusTitle: {
     fontSize: 24,
-    lineHeight: 38,
-    fontWeight: '500',
-  },
-  toolbelt: {
-    marginTop: spacing.xl,
-    gap: spacing.md,
-  },
-  stickyToolbelt: {
-    gap: spacing.md,
-    paddingHorizontal: spacing.md,
-    paddingTop: spacing.sm,
-    paddingBottom: spacing.md,
-  },
-  toolbeltLabel: {
-    fontSize: 14,
     fontWeight: '800',
-    letterSpacing: 1.5,
     textAlign: 'center',
   },
-  toolbeltRow: {
-    flexDirection: 'row',
-    gap: spacing.md,
-  },
-  toolButton: {
-    flex: 1,
-    height: 80,
-    borderRadius: 16,
-    borderWidth: 3,
-    justifyContent: 'center',
+  statusWrap: {
     alignItems: 'center',
-    flexDirection: 'row',
-    gap: 8,
+    flex: 1,
+    gap: spacing.sm,
+    justifyContent: 'center',
   },
-  toolButtonText: {
+  stepNumber: {
+    alignItems: 'center',
+    borderRadius: 8,
+    height: 32,
+    justifyContent: 'center',
+    width: 32,
+  },
+  stepNumberText: {
     color: '#FFF',
     fontSize: 18,
     fontWeight: '900',
   },
-  toolShadow: {
-    position: 'absolute',
-    width: '100%',
-    height: 80,
-    borderRadius: 16,
-    top: 6,
-    zIndex: -1,
-  },
-  historyContent: {
-    padding: spacing.md,
-    gap: spacing.md,
-  },
-  historyItem: {
-    padding: spacing.md,
-    borderRadius: 20,
-    borderWidth: 3,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  historyItemContent: {
-    flex: 1,
-    gap: 4,
-  },
-  historyItemTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-  },
-  historyItemDate: {
-    fontSize: 14,
-    fontWeight: '700',
-    textTransform: 'uppercase',
-  },
-  emptyContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 100,
+  stickyToolbelt: {
     gap: spacing.sm,
+    paddingBottom: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
   },
-  emptyText: {
-    fontSize: 24,
-    fontWeight: '800',
-  },
-  emptySubtext: {
-    fontSize: 18,
+  subtitle: {
+    fontSize: isSmallDevice ? 18 : 22,
+    lineHeight: 30,
+    paddingHorizontal: spacing.md,
     textAlign: 'center',
   },
-  footer: {
-    marginTop: spacing.xl,
-    alignItems: 'center',
-  },
-  secondaryButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.xl,
+  textContainer: {
+    borderRadius: 20,
     borderWidth: 3,
+    minHeight: 360,
+    padding: spacing.lg,
+  },
+  title: {
+    fontSize: isSmallDevice ? 32 : 44,
+    fontWeight: '900',
+    letterSpacing: -1,
+    textAlign: 'center',
+  },
+  toolButton: {
+    alignItems: 'center',
     borderRadius: 16,
+    borderWidth: 3,
+    flex: 1,
+    flexDirection: 'row',
+    gap: 8,
+    height: 70,
+    justifyContent: 'center',
+  },
+  toolButtonText: {
+    color: '#FFF',
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  toolbeltLabel: {
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    textAlign: 'center',
+    textTransform: 'uppercase',
+  },
+  toolbeltRow: {
+    flexDirection: 'row',
     gap: spacing.sm,
   },
-  secondaryButtonText: {
-    fontSize: 18,
-    fontWeight: '700',
+  transcriptText: {
+    fontWeight: '500',
   },
 });
