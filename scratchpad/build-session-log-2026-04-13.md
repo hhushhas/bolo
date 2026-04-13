@@ -11,3 +11,9 @@
 - 09:50 PKT: Added Convex schema, history queries, and a Node action for transcript fetching and OpenRouter-powered translation.
 - 09:51 PKT: Convex code generation was blocked because no deployment has been configured yet, so a temporary local `convex/_generated` shim was added to keep the project buildable until Hasan provides the real Convex project details.
 - 09:55 PKT: Verified `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm exec expo export --platform web` all pass.
+- 10:00 PKT: Wired the live Convex project `shocking-bandicoot-353`, set `OPENROUTER_API_KEY`, and deployed the backend successfully.
+- 10:06 PKT: Smoke-tested the live transcription action against a public YouTube video and confirmed saved history records were being created in Convex.
+- 10:07 PKT: Discovered a translation edge case when source language is auto-detected and target language matches the detected language; updated the action to skip unnecessary translation in that case and redeployed.
+- 10:13 PKT: Installed a fresh native debug build onto the `HasanHeadquaters-Android-Fresh` Android emulator without touching the already-running emulator.
+- 10:17 PKT: Isolated the new emulator from another project’s Metro process by assigning a clean port, rebinding the app’s debug host, and verifying the Bolo UI rendered on the fresh emulator.
+- 10:18 PKT: Re-ran `pnpm lint`, `pnpm typecheck`, and `pnpm test` after the live wiring and emulator work; all passed.

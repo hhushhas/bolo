@@ -6,6 +6,15 @@ const youtubeHostnames = new Set([
   'm.youtube.com',
 ]);
 
+export type YouTubePreview = {
+  authorName?: string;
+  kind: 'short' | 'video';
+  thumbnailUrl: string;
+  title: string;
+  url: string;
+  videoId: string;
+};
+
 export const parseYouTubeUrl = (value: string) => {
   const trimmed = value.trim();
 
@@ -91,7 +100,7 @@ export const fetchYouTubePreview = async (url: string) => {
     title: (data.title as string | undefined) ?? 'YouTube video',
     url: parsed.cleanUrl,
     videoId: parsed.videoId,
-  };
+  } satisfies YouTubePreview;
 };
 
 export const buildWhatsAppShareUrl = (text: string) =>

@@ -21,7 +21,8 @@
         "backgroundColor": "#fbf1c7"
       },
       "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.anonymous.bolotranscriber"
     },
     "web": {
       "favicon": "./assets/favicon.png"

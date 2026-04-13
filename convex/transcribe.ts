@@ -5,7 +5,8 @@ import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { action } from './_generated/server';
 import { internal } from './_generated/api';
 import { v } from 'convex/values';
-import { YoutubeTranscript } from 'youtube-transcript';
+import type { Id } from './_generated/dataModel';
+import type { TranscriptResponse } from 'youtube-transcript';
 
 const youtubeHostnames = new Set([
   'youtu.be',
@@ -75,7 +76,7 @@ const parseYouTubeUrl = (value: string) => {
 const getYouTubeThumbnailUrl = (videoId: string) =>
   `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
 
-const normalizeTranscript = (lines: Awaited<ReturnType<typeof YoutubeTranscript.fetchTranscript>>) => {
+const normalizeTranscript = (lines: TranscriptResponse[]) => {
   const chunks: string[] = [];
   let paragraph = '';
 
@@ -151,15 +152,23 @@ const fetchMetadata = async (cleanUrl: string, videoId: string) => {
 };
 
 const translateTranscript = async ({
+  sourceLanguageCode,
   sourceLanguageLabel,
   targetLanguageLabel,
+  targetLanguageCode,
   transcriptText,
 }: {
+  sourceLanguageCode: string;
   sourceLanguageLabel: string;
   targetLanguageLabel: string;
+  targetLanguageCode: string;
   transcriptText: string;
 }) => {
-  if (targetLanguageLabel === 'Auto detect' || sourceLanguageLabel === targetLanguageLabel) {
+  if (
+    targetLanguageLabel === 'Auto detect' ||
+    sourceLanguageLabel === targetLanguageLabel ||
+    sourceLanguageCode === targetLanguageCode
+  ) {
     return transcriptText;
   }
 
@@ -200,12 +209,12 @@ export const transcribeVideo = action({
     youtubeUrl: v.string(),
   },
   returns: v.id('entries'),
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<Id<'entries'>> => {
     const { cleanUrl, videoId } = parseYouTubeUrl(args.youtubeUrl);
     const metadata = await fetchMetadata(cleanUrl, videoId);
     const timestamp = Date.now();
 
-    const entryId = await ctx.runMutation(internal.entries.createEntry, {
+    const entryId: Id<'entries'> = await ctx.runMutation(internal.entries.createEntry, {
       ...args,
       ...metadata,
       createdAt: timestamp,
@@ -216,19 +225,24 @@ export const transcribeVideo = action({
     });
 
     try {
-      const transcriptLines = await YoutubeTranscript.fetchTranscript(videoId);
+      const { fetchTranscript } = await import('youtube-transcript/dist/youtube-transcript.esm.js');
+      const transcriptLines = await fetchTranscript(videoId);
       const transcriptText = normalizeTranscript(transcriptLines);
+      const detectedLanguageCode = transcriptLines.find((line) => line.lang)?.lang ?? args.sourceLanguage;
 
       if (!transcriptText) {
         throw new Error('No transcript was returned for this video.');
       }
 
       const translationText = await translateTranscript({
+        sourceLanguageCode:
+          args.sourceLanguage === 'auto' ? detectedLanguageCode : args.sourceLanguage,
         sourceLanguageLabel:
           args.sourceLanguageLabel === 'Auto detect'
             ? 'the transcript language'
             : args.sourceLanguageLabel,
         targetLanguageLabel: args.targetLanguageLabel,
+        targetLanguageCode: args.targetLanguage,
         transcriptText,
       });
 

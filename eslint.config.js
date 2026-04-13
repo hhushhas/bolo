@@ -4,6 +4,6 @@ const { defineConfig } = require('eslint/config');
 module.exports = defineConfig([
   expoConfig,
   {
-    ignores: ['convex/_generated/*'],
+    ignores: ['convex/_generated/*', 'dist/*'],
   },
 ]);

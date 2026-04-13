@@ -16,7 +16,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { defaultSourceLanguage, defaultTargetLanguage, getLanguageLabel } from '../constants/languages';
 import { palette, spacing } from '../constants/theme';
-import { buildWhatsAppShareUrl, fetchYouTubePreview, parseYouTubeUrl } from '../lib/youtube';
+import {
+  buildWhatsAppShareUrl,
+  fetchYouTubePreview,
+  parseYouTubeUrl,
+  type YouTubePreview,
+} from '../lib/youtube';
 import { GuideCard } from '../components/GuideCard';
 import { LanguagePickerSheet } from '../components/LanguagePickerSheet';
 import { ResultReader } from '../components/ResultReader';
@@ -43,7 +48,7 @@ export function HomeScreen({
   const scheme = useColorScheme();
   const colors = palette[scheme === 'dark' ? 'dark' : 'light'];
   const [url, setUrl] = useState('');
-  const [preview, setPreview] = useState<Awaited<ReturnType<typeof fetchYouTubePreview>> | null>(null);
+  const [preview, setPreview] = useState<YouTubePreview | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [selectedEntryId, setSelectedEntryId] = useState<Doc<'entries'>['_id'] | null>(null);
   const [sourceLanguage, setSourceLanguage] = useState<string>(defaultSourceLanguage.code);
