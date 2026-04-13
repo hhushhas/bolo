@@ -1,0 +1,42 @@
+export const palette = {
+  light: {
+    background: '#fbf1c7',
+    backgroundAccent: '#f2e5bc',
+    surface: '#f9f5d7',
+    surfaceStrong: '#f2e5bc',
+    border: '#d5c4a1',
+    text: '#3c3836',
+    textSoft: '#665c54',
+    accent: '#d79921',
+    accentStrong: '#b57614',
+    success: '#98971a',
+    info: '#458588',
+    danger: '#cc241d',
+    reader: '#fff8dc',
+    shadow: 'rgba(60, 56, 54, 0.12)',
+  },
+  dark: {
+    background: '#282828',
+    backgroundAccent: '#32302f',
+    surface: '#3c3836',
+    surfaceStrong: '#504945',
+    border: '#665c54',
+    text: '#ebdbb2',
+    textSoft: '#d5c4a1',
+    accent: '#fabd2f',
+    accentStrong: '#fe8019',
+    success: '#b8bb26',
+    info: '#83a598',
+    danger: '#fb4934',
+    reader: '#32302f',
+    shadow: 'rgba(0, 0, 0, 0.3)',
+  },
+} as const;
+
+export const spacing = {
+  xs: 8,
+  sm: 12,
+  md: 16,
+  lg: 20,
+  xl: 28,
+} as const;
