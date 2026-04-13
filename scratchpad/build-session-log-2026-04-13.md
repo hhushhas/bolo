@@ -17,3 +17,5 @@
 - 10:13 PKT: Installed a fresh native debug build onto the `HasanHeadquaters-Android-Fresh` Android emulator without touching the already-running emulator.
 - 10:17 PKT: Isolated the new emulator from another project’s Metro process by assigning a clean port, rebinding the app’s debug host, and verifying the Bolo UI rendered on the fresh emulator.
 - 10:18 PKT: Re-ran `pnpm lint`, `pnpm typecheck`, and `pnpm test` after the live wiring and emulator work; all passed.
+- 10:37 PKT: User clarified to preserve the newer visual direction and only repair missing functionality; started a minimal functional patch for preview, reader visibility, and copy/share behavior.
+- 10:42 PKT: Fixed the functional regression in the current design by restoring live YouTube preview fetch, showing the saved thumbnail in the reader, surfacing processing/failed states, and guarding copy/share until text is ready.
