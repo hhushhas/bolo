@@ -7,6 +7,7 @@ import { internal } from './_generated/api';
 import { v } from 'convex/values';
 import type { Id } from './_generated/dataModel';
 import type { TranscriptResponse } from 'youtube-transcript';
+import { fetchTranscriptLinesFromYouTube, normalizeTranscriptLines } from '../src/lib/youtubeCaptions';
 
 const youtubeHostnames = new Set([
   'youtu.be',
@@ -76,30 +77,33 @@ const parseYouTubeUrl = (value: string) => {
 const getYouTubeThumbnailUrl = (videoId: string) =>
   `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
 
-const normalizeTranscript = (lines: TranscriptResponse[]) => {
-  const chunks: string[] = [];
-  let paragraph = '';
+const fetchTranscriptLines = async (
+  videoId: string,
+  preferredLanguageCode?: string,
+): Promise<TranscriptResponse[]> => {
+  let packageError: unknown;
 
-  for (const line of lines) {
-    const next = line.text.replace(/\s+/g, ' ').trim();
-
-    if (!next) {
-      continue;
-    }
-
-    paragraph = paragraph ? `${paragraph} ${next}` : next;
-
-    if (paragraph.length >= 280 || /[.!?]$/.test(next)) {
-      chunks.push(paragraph);
-      paragraph = '';
-    }
+  try {
+    return await fetchTranscriptLinesFromYouTube(videoId, preferredLanguageCode);
+  } catch (error) {
+    packageError = error;
   }
 
-  if (paragraph) {
-    chunks.push(paragraph);
-  }
+  try {
+    const { fetchTranscript } = await import('youtube-transcript/dist/youtube-transcript.esm.js');
+    return await fetchTranscript(
+      videoId,
+      preferredLanguageCode && preferredLanguageCode !== 'auto'
+        ? { lang: preferredLanguageCode }
+        : undefined,
+    );
+  } catch (error) {
+    if (packageError instanceof Error) {
+      throw packageError;
+    }
 
-  return chunks.join('\n\n');
+    throw error;
+  }
 };
 
 const splitForTranslation = (text: string, maxChars = 3400) => {
@@ -202,10 +206,12 @@ const translateTranscript = async ({
 
 export const transcribeVideo = action({
   args: {
+    detectedLanguageCode: v.optional(v.string()),
     sourceLanguage: v.string(),
     sourceLanguageLabel: v.string(),
     targetLanguage: v.string(),
     targetLanguageLabel: v.string(),
+    transcriptText: v.optional(v.string()),
     youtubeUrl: v.string(),
   },
   returns: v.id('entries'),
@@ -215,20 +221,28 @@ export const transcribeVideo = action({
     const timestamp = Date.now();
 
     const entryId: Id<'entries'> = await ctx.runMutation(internal.entries.createEntry, {
-      ...args,
       ...metadata,
       createdAt: timestamp,
+      sourceLanguage: args.sourceLanguage,
+      sourceLanguageLabel: args.sourceLanguageLabel,
       status: 'processing',
+      targetLanguage: args.targetLanguage,
+      targetLanguageLabel: args.targetLanguageLabel,
       updatedAt: timestamp,
       videoId,
       youtubeUrl: cleanUrl,
     });
 
     try {
-      const { fetchTranscript } = await import('youtube-transcript/dist/youtube-transcript.esm.js');
-      const transcriptLines = await fetchTranscript(videoId);
-      const transcriptText = normalizeTranscript(transcriptLines);
-      const detectedLanguageCode = transcriptLines.find((line) => line.lang)?.lang ?? args.sourceLanguage;
+      let transcriptText = args.transcriptText;
+      let detectedLanguageCode = args.detectedLanguageCode ?? args.sourceLanguage;
+
+      if (!transcriptText) {
+        const transcriptLines = await fetchTranscriptLines(videoId, args.sourceLanguage);
+        transcriptText = normalizeTranscriptLines(transcriptLines);
+        detectedLanguageCode =
+          transcriptLines.find((line) => line.lang)?.lang ?? args.sourceLanguage;
+      }
 
       if (!transcriptText) {
         throw new Error('No transcript was returned for this video.');

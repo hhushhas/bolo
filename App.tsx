@@ -4,6 +4,8 @@ import { StatusBar } from 'expo-status-bar';
 import { ConvexProvider, ConvexReactClient, useAction, useQuery } from 'convex/react';
 import { api } from './convex/_generated/api';
 import { HomeScreen } from './src/screens/HomeScreen';
+import { parseYouTubeUrl } from './src/lib/youtube';
+import { normalizeTranscriptLines } from './src/lib/youtubeCaptions';
 
 const convexUrl = process.env.EXPO_PUBLIC_CONVEX_URL;
 const convexClient = convexUrl ? new ConvexReactClient(convexUrl) : null;
@@ -21,7 +23,27 @@ function ConnectedApp() {
       onTranscribe={async (args) => {
         try {
           setIsWorking(true);
-          return await transcribeVideo(args);
+          const parsed = parseYouTubeUrl(args.youtubeUrl);
+          let transcriptLines = null;
+
+          if (parsed) {
+            try {
+              const { fetchTranscript } = await import('youtube-transcript/dist/youtube-transcript.esm.js');
+              transcriptLines = await fetchTranscript(
+                parsed.videoId,
+                args.sourceLanguage !== 'auto' ? { lang: args.sourceLanguage } : undefined,
+              );
+            } catch {
+              transcriptLines = null;
+            }
+          }
+
+          return await transcribeVideo({
+            ...args,
+            detectedLanguageCode:
+              transcriptLines?.find((line) => line.lang)?.lang ?? args.sourceLanguage,
+            transcriptText: transcriptLines ? normalizeTranscriptLines(transcriptLines) : undefined,
+          });
         } catch (error) {
           Alert.alert(
             'Something went wrong',

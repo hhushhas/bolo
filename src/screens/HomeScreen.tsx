@@ -1,4 +1,4 @@
-import { startTransition, useDeferredValue, useEffect, useState } from 'react';
+import { useState, useEffect, useDeferredValue } from 'react';
 import {
   Alert,
   Image,
@@ -11,6 +11,7 @@ import {
   View,
   useColorScheme,
   Dimensions,
+  ActivityIndicator,
 } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -46,55 +47,37 @@ export function HomeScreen({
 }) {
   const scheme = useColorScheme();
   const colors = palette[scheme === 'dark' ? 'dark' : 'light'];
-
+  
   const [url, setUrl] = useState('');
   const [view, setView] = useState<'input' | 'reading' | 'history'>('input');
   const [selectedEntryId, setSelectedEntryId] = useState<Doc<'entries'>['_id'] | null>(null);
   const [preview, setPreview] = useState<YouTubePreview | null>(null);
-  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+
   const deferredUrl = useDeferredValue(url);
 
-  useEffect(() => {
-    if (!selectedEntryId && entries[0]) {
-      setSelectedEntryId(entries[0]._id);
-    }
-  }, [entries, selectedEntryId]);
-
+  // Handle YouTube Preview Fetching
   useEffect(() => {
     const parsed = parseYouTubeUrl(deferredUrl);
-
-    if (!deferredUrl.trim()) {
+    if (!deferredUrl.trim() || !parsed) {
       setPreview(null);
-      setPreviewError(null);
-      return;
-    }
-
-    if (!parsed) {
-      setPreview(null);
-      setPreviewError('Paste a full YouTube video or Shorts link to see the preview.');
       return;
     }
 
     let cancelled = false;
     const timeout = setTimeout(async () => {
+      setIsPreviewLoading(true);
       try {
         const nextPreview = await fetchYouTubePreview(parsed.cleanUrl);
-
         if (!cancelled) {
-          startTransition(() => {
-            setPreview(nextPreview);
-            setPreviewError(null);
-          });
+          setPreview(nextPreview);
         }
-      } catch (error) {
-        if (!cancelled) {
-          setPreview(null);
-          setPreviewError(
-            error instanceof Error ? error.message : 'We could not load that video preview.',
-          );
-        }
+      } catch {
+        if (!cancelled) setPreview(null);
+      } finally {
+        if (!cancelled) setIsPreviewLoading(false);
       }
-    }, 250);
+    }, 500);
 
     return () => {
       cancelled = true;
@@ -102,24 +85,17 @@ export function HomeScreen({
     };
   }, [deferredUrl]);
 
-  const selectedEntry = entries.find((entry) => entry._id === selectedEntryId) ?? entries[0] ?? null;
-  const selectedText = selectedEntry?.translationText || selectedEntry?.transcriptText || '';
-  const readingStatusLabel =
-    selectedEntry?.status === 'failed'
-      ? 'Needs another try'
-      : selectedEntry?.status === 'ready'
-        ? 'Ready to read'
-        : 'Working on it';
+  const selectedEntry = entries.find((e) => e._id === selectedEntryId) || entries[0];
 
   const handleReadVideo = async () => {
     const parsed = parseYouTubeUrl(url);
     if (!parsed) {
-      Alert.alert('Please check the link', 'Copy the full link from YouTube and paste it here.');
+      Alert.alert('Check the Link', 'Please copy the link from YouTube and paste it in the box.');
       return;
     }
 
     if (!backendReady) {
-      Alert.alert('App Maintenance', 'We are getting things ready. Please try again later.');
+      Alert.alert('Almost Ready', 'We are setting up your reader. Please try again in a few seconds.');
       return;
     }
 
@@ -137,194 +113,170 @@ export function HomeScreen({
         setView('reading');
       }
     } catch {
-      Alert.alert('Error', 'Could not read that video. Please try another one.');
+      Alert.alert('Sorry!', 'We couldn\'t read this video. Please try another one.');
     }
   };
 
   const handleSelectHistory = (id: Doc<'entries'>['_id']) => {
-    const entry = entries.find((item) => item._id === id);
-
-    if (!entry) {
-      return;
-    }
-
-    startTransition(() => {
-      setSelectedEntryId(id);
-      setUrl(entry.youtubeUrl);
-      setPreview({
-        authorName: entry.channelTitle,
-        kind: 'video',
-        thumbnailUrl: entry.thumbnailUrl,
-        title: entry.title,
-        url: entry.youtubeUrl,
-        videoId: entry.videoId,
-      });
-      setPreviewError(null);
-      setView('reading');
-    });
+    setSelectedEntryId(id);
+    setView('reading');
   };
 
-  const handleShareWhatsApp = async () => {
-    if (!selectedEntry || selectedEntry.status !== 'ready' || !selectedText) {
-      Alert.alert('Almost ready', 'Please wait until the transcript appears before sharing.');
-      return;
-    }
+  // --- SUB-VIEWS ---
 
-    const text = `Check out this video summary: ${selectedEntry.title}\n\n${selectedText}`;
-    await Linking.openURL(buildWhatsAppShareUrl(text));
-  };
+  const renderReadingView = () => {
+    if (!selectedEntry) return null;
 
-  if (view === 'reading' && selectedEntry) {
+    const selectedText = selectedEntry.translationText || selectedEntry.transcriptText || '';
+    const isReady = selectedEntry.status === 'ready' && Boolean(selectedText);
+    const isFailed = selectedEntry.status === 'failed';
+
     return (
       <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
-        <View style={styles.header}>
+        <View style={[styles.header, { borderBottomWidth: 3, borderColor: colors.border }]}>
           <Pressable onPress={() => setView('input')} style={styles.backButton}>
-            <MaterialCommunityIcons name="arrow-left" size={32} color={colors.text} />
+            <MaterialCommunityIcons name="chevron-left" size={38} color={colors.text} />
             <Text style={[styles.backText, { color: colors.text }]}>Back</Text>
           </Pressable>
+          <Text style={[styles.headerTitle, { color: colors.text }]}>Reading Mode</Text>
         </View>
         
         <ScrollView contentContainerStyle={styles.readingContent} showsVerticalScrollIndicator={false}>
-          <View
-            style={[
-              styles.readingPreviewCard,
-              {
-                backgroundColor: colors.surface,
-                borderColor: colors.border,
-                shadowColor: colors.shadow,
-              },
-            ]}
-          >
-            <Image source={{ uri: selectedEntry.thumbnailUrl }} style={styles.readingThumbnail} />
-            <View style={styles.readingPreviewBody}>
-              <View
-                style={[
-                  styles.readingBadge,
-                  { backgroundColor: colors.backgroundAccent, borderColor: colors.border },
-                ]}
-              >
-                <Text style={[styles.readingBadgeText, { color: colors.accent }]}>
-                  {readingStatusLabel}
+          <View style={styles.bookWrapper}>
+            <View style={[styles.readingPreviewCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+              <Image source={{ uri: selectedEntry.thumbnailUrl }} style={styles.readingPreviewThumb} />
+              <View style={styles.readingPreviewInfo}>
+                <Text style={[styles.previewBadge, { color: colors.accent }]}>
+                  {isFailed ? 'Could not transcribe' : isReady ? 'Ready to read' : 'Preparing transcript'}
+                </Text>
+                <Text numberOfLines={3} style={[styles.readingPreviewTitle, { color: colors.text }]}>
+                  {selectedEntry.title}
+                </Text>
+                <Text style={[styles.previewAuthor, { color: colors.textSoft }]}>
+                  {selectedEntry.channelTitle ?? 'YouTube'}
                 </Text>
               </View>
-              <Text style={[styles.videoTitle, { color: colors.text }]}>{selectedEntry.title}</Text>
-              <Text style={[styles.videoMeta, { color: colors.textSoft }]}>
-                {selectedEntry.channelTitle ?? 'YouTube'} • {selectedEntry.targetLanguageLabel}
-              </Text>
+            </View>
+
+            <Text style={[styles.videoTitle, { color: colors.text }]}>{selectedEntry.title}</Text>
+            <View style={[styles.textContainer, { backgroundColor: colors.reader, borderColor: colors.border }]}>
+              {isFailed ? (
+                <View style={styles.statusWrap}>
+                  <MaterialCommunityIcons name="alert-circle-outline" size={36} color={colors.danger} />
+                  <Text style={[styles.statusTitle, { color: colors.danger }]}>We could not get the transcript</Text>
+                  <Text style={[styles.statusText, { color: colors.text }]}>
+                    {selectedEntry.errorMessage ?? 'Please try another video.'}
+                  </Text>
+                </View>
+              ) : isReady ? (
+                <Text selectable style={[styles.transcriptText, { color: colors.text }]}>
+                  {selectedText}
+                </Text>
+              ) : (
+                <View style={styles.statusWrap}>
+                  <ActivityIndicator size="large" color={colors.accent} />
+                  <Text style={[styles.statusTitle, { color: colors.text }]}>Preparing your transcript</Text>
+                  <Text style={[styles.statusText, { color: colors.textSoft }]}>
+                    Stay on this screen for a few seconds. The text will appear here as soon as it is ready.
+                  </Text>
+                </View>
+              )}
             </View>
           </View>
 
-          {selectedEntry.status === 'failed' ? (
-            <View
-              style={[
-                styles.readerCard,
-                { backgroundColor: colors.surface, borderColor: colors.danger, shadowColor: colors.shadow },
-              ]}
-            >
-              <Text style={[styles.readerHeading, { color: colors.danger }]}>This video could not be read</Text>
-              <Text style={[styles.transcriptText, { color: colors.text }]}>
-                {selectedEntry.errorMessage ?? 'Please try another YouTube video link.'}
-              </Text>
-            </View>
-          ) : selectedEntry.status !== 'ready' ? (
-            <View
-              style={[
-                styles.readerCard,
-                { backgroundColor: colors.surface, borderColor: colors.border, shadowColor: colors.shadow },
-              ]}
-            >
-              <Text style={[styles.readerHeading, { color: colors.text }]}>We are preparing the text</Text>
-              <Text style={[styles.readerSupport, { color: colors.textSoft }]}>
-                Stay on this screen for a moment. When the transcript is ready, it will appear right here.
-              </Text>
-            </View>
-          ) : (
-            <View
-              style={[
-                styles.readerCard,
-                {
-                  backgroundColor: colors.reader,
-                  borderColor: colors.border,
-                  shadowColor: colors.shadow,
-                },
-              ]}
-            >
-              <Text style={[styles.readerHeading, { color: colors.text }]}>Translation</Text>
-              <Text selectable style={[styles.transcriptText, { color: colors.text }]}>
-                {selectedText}
-              </Text>
-            </View>
-          )}
-
-          <View style={styles.actionRow}>
-            <Pressable
-              onPress={handleShareWhatsApp}
-              style={[
-                styles.actionButton,
-                {
-                  backgroundColor: selectedEntry.status === 'ready' ? colors.info : colors.textSoft,
-                },
-              ]}
-            >
-              <MaterialCommunityIcons name="whatsapp" size={28} color="#FFF" />
-              <Text style={styles.actionButtonText}>Send to WhatsApp</Text>
-            </Pressable>
-
-            <Pressable
-              onPress={async () => {
-                if (selectedEntry.status !== 'ready' || !selectedText) {
-                  Alert.alert('Almost ready', 'Please wait until the transcript appears before copying.');
-                  return;
-                }
-
-                await Clipboard.setStringAsync(selectedText);
-                Alert.alert('Copied!', 'The text is ready to paste.');
-              }}
-              style={[
-                styles.actionButton,
-                {
-                  backgroundColor: selectedEntry.status === 'ready' ? colors.accent : colors.textSoft,
-                },
-              ]}
-            >
-              <MaterialCommunityIcons name="content-copy" size={28} color="#FFF" />
-              <Text style={styles.actionButtonText}>Copy Text</Text>
-            </Pressable>
-          </View>
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
-
-  if (view === 'history') {
-    return (
-      <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
-        <View style={styles.header}>
-          <Pressable onPress={() => setView('input')} style={styles.backButton}>
-            <MaterialCommunityIcons name="arrow-left" size={32} color={colors.text} />
-            <Text style={[styles.backText, { color: colors.text }]}>Back</Text>
-          </Pressable>
-        </View>
-        <ScrollView contentContainerStyle={styles.historyContent}>
-          <Text style={[styles.screenTitle, { color: colors.text }]}>Your Old Videos</Text>
-          {entries.length === 0 ? (
-            <Text style={[styles.emptyText, { color: colors.textSoft }]}>You have not read any videos yet.</Text>
-          ) : (
-            entries.map((entry) => (
+          <View style={styles.toolbelt}>
+            <Text style={[styles.toolbeltLabel, { color: colors.textSoft }]}>SHARE OR SAVE THIS TEXT</Text>
+            <View style={styles.toolbeltRow}>
               <Pressable 
-                key={entry._id} 
-                onPress={() => handleSelectHistory(entry._id)}
-                style={[styles.historyItem, { backgroundColor: colors.backgroundAccent, borderColor: colors.border }]}
+                onPress={() => {
+                  if (!isReady) {
+                    Alert.alert('Not ready yet', 'Please wait until the transcript appears before sharing.');
+                    return;
+                  }
+
+                  Linking.openURL(buildWhatsAppShareUrl(`Check out this video: ${selectedEntry.title}\n\n${selectedText}`));
+                }}
+                style={({ pressed }) => [
+                  styles.toolButton, 
+                  { backgroundColor: colors.info, borderColor: colors.border, top: pressed ? 4 : 0 }
+                ]}
               >
-                <Text numberOfLines={2} style={[styles.historyItemTitle, { color: colors.text }]}>{entry.title}</Text>
-                <MaterialCommunityIcons name="chevron-right" size={32} color={colors.textSoft} />
+                <MaterialCommunityIcons name="whatsapp" size={32} color="#FFF" />
+                <Text style={styles.toolButtonText}>WhatsApp</Text>
+                <View style={[styles.toolShadow, { backgroundColor: colors.border }]} />
               </Pressable>
-            ))
-          )}
+              
+              <Pressable 
+                onPress={async () => {
+                  if (!isReady) {
+                    Alert.alert('Not ready yet', 'Please wait until the transcript appears before copying.');
+                    return;
+                  }
+
+                  await Clipboard.setStringAsync(selectedText);
+                  Alert.alert('Copied!', 'The text is ready to paste anywhere.');
+                }}
+                style={({ pressed }) => [
+                  styles.toolButton, 
+                  { backgroundColor: colors.accent, borderColor: colors.border, top: pressed ? 4 : 0 }
+                ]}
+              >
+                <MaterialCommunityIcons name="content-copy" size={32} color="#FFF" />
+                <Text style={styles.toolButtonText}>Copy Text</Text>
+                <View style={[styles.toolShadow, { backgroundColor: colors.border }]} />
+              </Pressable>
+            </View>
+          </View>
         </ScrollView>
       </SafeAreaView>
     );
-  }
+  };
+
+  const renderHistoryView = () => (
+    <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
+      <View style={[styles.header, { borderBottomWidth: 3, borderColor: colors.border }]}>
+        <Pressable onPress={() => setView('input')} style={styles.backButton}>
+          <MaterialCommunityIcons name="chevron-left" size={38} color={colors.text} />
+          <Text style={[styles.backText, { color: colors.text }]}>Back</Text>
+        </Pressable>
+        <Text style={[styles.headerTitle, { color: colors.text }]}>My History</Text>
+      </View>
+      <ScrollView contentContainerStyle={styles.historyContent} showsVerticalScrollIndicator={false}>
+        {entries.length === 0 ? (
+          <View style={styles.emptyContainer}>
+            <MaterialCommunityIcons name="book-open-outline" size={80} color={colors.textSoft} />
+            <Text style={[styles.emptyText, { color: colors.textSoft }]}>Your library is empty.</Text>
+            <Text style={[styles.emptySubtext, { color: colors.textSoft }]}>Videos you read will appear here.</Text>
+          </View>
+        ) : (
+          entries.map((entry) => (
+            <Pressable 
+              key={entry._id} 
+              onPress={() => handleSelectHistory(entry._id)}
+              style={({ pressed }) => [
+                styles.historyItem, 
+                { 
+                  backgroundColor: pressed ? colors.backgroundAccent : colors.surface, 
+                  borderColor: colors.border 
+                }
+              ]}
+            >
+              <View style={styles.historyItemContent}>
+                <Text numberOfLines={2} style={[styles.historyItemTitle, { color: colors.text }]}>{entry.title}</Text>
+                <Text style={[styles.historyItemDate, { color: colors.textSoft }]}>
+                  {entry.sourceLanguageLabel} to {entry.targetLanguageLabel}
+                </Text>
+              </View>
+              <MaterialCommunityIcons name="arrow-right-circle" size={32} color={colors.accent} />
+            </Pressable>
+          ))
+        )}
+      </ScrollView>
+    </SafeAreaView>
+  );
+
+  if (view === 'reading') return renderReadingView();
+  if (view === 'history') return renderHistoryView();
 
   return (
     <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
@@ -339,7 +291,7 @@ export function HomeScreen({
           </Text>
         </View>
 
-        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border, shadowColor: colors.shadow }]}>
+        <View style={[styles.card, { backgroundColor: colors.surface, borderColor: colors.border }]}>
           <View style={[styles.cardHeader, { backgroundColor: colors.border }]}>
             <View style={[styles.stepNumber, { backgroundColor: colors.accent }]}>
               <Text style={styles.stepNumberText}>1</Text>
@@ -349,10 +301,10 @@ export function HomeScreen({
           
           <View style={styles.cardBody}>
             <TextInput
-              style={[styles.mainInput, {
-                backgroundColor: colors.backgroundAccent,
+              style={[styles.mainInput, { 
+                backgroundColor: colors.backgroundAccent, 
                 borderColor: colors.border,
-                color: colors.text,
+                color: colors.text 
               }]}
               placeholder="Tap here and paste link..."
               placeholderTextColor={colors.textSoft}
@@ -362,52 +314,29 @@ export function HomeScreen({
               autoCorrect={false}
             />
 
-            {preview ? (
-              <View
-                style={[
-                  styles.previewCard,
-                  {
-                    backgroundColor: colors.backgroundAccent,
-                    borderColor: colors.border,
-                  },
-                ]}
-              >
-                <Image source={{ uri: preview.thumbnailUrl }} style={styles.previewThumbnail} />
-                <View style={styles.previewBody}>
-                  <Text style={[styles.previewEyebrow, { color: colors.accent }]}>
-                    {preview.kind === 'short' ? 'YouTube Shorts' : 'YouTube video'}
-                  </Text>
-                  <Text numberOfLines={3} style={[styles.previewTitle, { color: colors.text }]}>
-                    {preview.title}
-                  </Text>
-                  <Text style={[styles.previewMeta, { color: colors.textSoft }]}>
-                    {preview.authorName ?? 'YouTube'}
-                  </Text>
+            {/* Video Preview Logic */}
+            {isPreviewLoading ? (
+              <View style={styles.previewPlaceholder}>
+                <ActivityIndicator size="large" color={colors.accent} />
+                <Text style={[styles.previewPlaceholderText, { color: colors.textSoft }]}>Checking video...</Text>
+              </View>
+            ) : preview ? (
+              <View style={[styles.previewCard, { borderColor: colors.border, backgroundColor: colors.backgroundAccent }]}>
+                <Image source={{ uri: preview.thumbnailUrl }} style={styles.previewThumb} />
+                <View style={styles.previewInfo}>
+                  <Text numberOfLines={2} style={[styles.previewTitle, { color: colors.text }]}>{preview.title}</Text>
+                  <Text style={[styles.previewAuthor, { color: colors.textSoft }]}>{preview.authorName}</Text>
                 </View>
               </View>
-            ) : (
-              <View
-                style={[
-                  styles.previewHelp,
-                  {
-                    backgroundColor: colors.backgroundAccent,
-                    borderColor: colors.border,
-                  },
-                ]}
-              >
-                <Text style={[styles.previewHelpText, { color: colors.textSoft }]}>
-                  {previewError ?? 'The thumbnail and title will appear here after you paste a valid link.'}
-                </Text>
-              </View>
-            )}
+            ) : null}
 
             <View style={styles.buttonContainer}>
-              <Pressable
+              <Pressable 
                 onPress={handleReadVideo}
                 disabled={isWorking}
                 style={({ pressed }) => [
-                  styles.bigButton,
-                  {
+                  styles.bigButton, 
+                  { 
                     backgroundColor: isWorking ? colors.textSoft : colors.accent,
                     borderColor: colors.border,
                     opacity: pressed ? 0.9 : 1,
@@ -415,9 +344,12 @@ export function HomeScreen({
                   }
                 ]}
               >
-                <Text style={styles.bigButtonText}>
-                  {isWorking ? 'Thinking...' : '2. Read the Video'}
-                </Text>
+                <View style={styles.buttonContent}>
+                  {isWorking && <ActivityIndicator size="small" color="#FFF" style={{ marginRight: 8 }} />}
+                  <Text style={styles.bigButtonText}>
+                    {isWorking ? 'Reading Video...' : '2. Read the Video'}
+                  </Text>
+                </View>
               </Pressable>
               <View style={[styles.buttonShadow, { backgroundColor: colors.border }]} />
             </View>
@@ -454,6 +386,25 @@ const styles = StyleSheet.create({
     paddingTop: spacing.xl,
     paddingBottom: spacing.xl,
   },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing.md,
+    justifyContent: 'space-between',
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  backText: {
+    fontSize: 20,
+    fontWeight: '700',
+  },
   hero: {
     marginBottom: spacing.xl,
     alignItems: 'center',
@@ -485,6 +436,11 @@ const styles = StyleSheet.create({
     borderRadius: 24,
     borderWidth: 3,
     overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.1,
+    shadowRadius: 10,
+    elevation: 5,
   },
   cardHeader: {
     flexDirection: 'row',
@@ -519,6 +475,42 @@ const styles = StyleSheet.create({
     fontSize: 20,
     minHeight: 70,
   },
+  previewPlaceholder: {
+    height: 100,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+  },
+  previewPlaceholderText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  previewCard: {
+    borderRadius: 16,
+    borderWidth: 2,
+    overflow: 'hidden',
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: spacing.sm,
+    gap: spacing.sm,
+  },
+  previewThumb: {
+    width: 80,
+    height: 60,
+    borderRadius: 8,
+  },
+  previewInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  previewTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  previewAuthor: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
   buttonContainer: {
     marginTop: spacing.xs,
     position: 'relative',
@@ -534,6 +526,10 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: '100%',
   },
+  buttonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   buttonShadow: {
     height: 86,
     borderRadius: 16,
@@ -546,6 +542,145 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '900',
     letterSpacing: 1,
+  },
+  readingContent: {
+    padding: spacing.md,
+    paddingBottom: spacing.xl,
+  },
+  bookWrapper: {
+    gap: spacing.md,
+  },
+  readingPreviewCard: {
+    borderRadius: 18,
+    borderWidth: 3,
+    overflow: 'hidden',
+  },
+  readingPreviewThumb: {
+    aspectRatio: 16 / 9,
+    width: '100%',
+  },
+  readingPreviewInfo: {
+    gap: 4,
+    padding: spacing.md,
+  },
+  previewBadge: {
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  readingPreviewTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    lineHeight: 28,
+  },
+  videoTitle: {
+    fontSize: 28,
+    fontWeight: '900',
+    lineHeight: 36,
+  },
+  textContainer: {
+    padding: spacing.lg,
+    borderRadius: 20,
+    borderWidth: 3,
+    minHeight: 400,
+  },
+  statusWrap: {
+    alignItems: 'center',
+    flex: 1,
+    gap: spacing.sm,
+    justifyContent: 'center',
+  },
+  statusTitle: {
+    fontSize: 24,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  statusText: {
+    fontSize: 20,
+    lineHeight: 30,
+    textAlign: 'center',
+  },
+  transcriptText: {
+    fontSize: 24,
+    lineHeight: 38,
+    fontWeight: '500',
+  },
+  toolbelt: {
+    marginTop: spacing.xl,
+    gap: spacing.md,
+  },
+  toolbeltLabel: {
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: 1.5,
+    textAlign: 'center',
+  },
+  toolbeltRow: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  toolButton: {
+    flex: 1,
+    height: 80,
+    borderRadius: 16,
+    borderWidth: 3,
+    justifyContent: 'center',
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  toolButtonText: {
+    color: '#FFF',
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  toolShadow: {
+    position: 'absolute',
+    width: '100%',
+    height: 80,
+    borderRadius: 16,
+    top: 6,
+    zIndex: -1,
+  },
+  historyContent: {
+    padding: spacing.md,
+    gap: spacing.md,
+  },
+  historyItem: {
+    padding: spacing.md,
+    borderRadius: 20,
+    borderWidth: 3,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  historyItemContent: {
+    flex: 1,
+    gap: 4,
+  },
+  historyItemTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+  },
+  historyItemDate: {
+    fontSize: 14,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 100,
+    gap: spacing.sm,
+  },
+  emptyText: {
+    fontSize: 24,
+    fontWeight: '800',
+  },
+  emptySubtext: {
+    fontSize: 18,
+    textAlign: 'center',
   },
   footer: {
     marginTop: spacing.xl,
@@ -562,165 +697,6 @@ const styles = StyleSheet.create({
   },
   secondaryButtonText: {
     fontSize: 18,
-    fontWeight: '600',
-  },
-  header: {
-    padding: spacing.md,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  backButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  backText: {
-    fontSize: 22,
     fontWeight: '700',
-  },
-  readingContent: {
-    padding: spacing.md,
-    paddingBottom: 100,
-  },
-  readingPreviewCard: {
-    borderRadius: 24,
-    borderWidth: 3,
-    marginBottom: spacing.md,
-    overflow: 'hidden',
-  },
-  readingThumbnail: {
-    aspectRatio: 16 / 9,
-    width: '100%',
-  },
-  readingPreviewBody: {
-    gap: spacing.xs,
-    padding: spacing.md,
-  },
-  readingBadge: {
-    alignSelf: 'flex-start',
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  readingBadgeText: {
-    fontSize: 14,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-  },
-  videoTitle: {
-    fontSize: 28,
-    fontWeight: '900',
-    lineHeight: 38,
-    marginBottom: spacing.sm,
-  },
-  videoMeta: {
-    fontSize: 18,
-    lineHeight: 26,
-  },
-  divider: {
-    height: 2,
-    marginBottom: spacing.md,
-  },
-  readerCard: {
-    borderRadius: 24,
-    borderWidth: 3,
-    marginBottom: spacing.lg,
-    padding: spacing.md,
-  },
-  readerHeading: {
-    fontSize: 22,
-    fontWeight: '800',
-    marginBottom: spacing.sm,
-  },
-  readerSupport: {
-    fontSize: 20,
-    lineHeight: 32,
-  },
-  transcriptText: {
-    fontSize: 24,
-    lineHeight: 36,
-    fontWeight: '500',
-  },
-  actionRow: {
-    marginTop: spacing.xl,
-    gap: spacing.md,
-  },
-  actionButton: {
-    height: 80,
-    borderRadius: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: spacing.sm,
-  },
-  actionButtonText: {
-    color: '#FFF',
-    fontSize: 20,
-    fontWeight: '800',
-  },
-  previewCard: {
-    borderRadius: 18,
-    borderWidth: 3,
-    overflow: 'hidden',
-  },
-  previewThumbnail: {
-    aspectRatio: 16 / 9,
-    width: '100%',
-  },
-  previewBody: {
-    gap: spacing.xs,
-    padding: spacing.md,
-  },
-  previewEyebrow: {
-    fontSize: 14,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-  },
-  previewTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    lineHeight: 30,
-  },
-  previewMeta: {
-    fontSize: 18,
-    lineHeight: 24,
-  },
-  previewHelp: {
-    borderRadius: 18,
-    borderWidth: 3,
-    padding: spacing.md,
-  },
-  previewHelpText: {
-    fontSize: 18,
-    lineHeight: 28,
-  },
-  historyContent: {
-    padding: spacing.md,
-  },
-  screenTitle: {
-    fontSize: 32,
-    fontWeight: '900',
-    marginBottom: spacing.lg,
-  },
-  historyItem: {
-    padding: spacing.md,
-    borderRadius: 16,
-    borderWidth: 2,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: spacing.md,
-  },
-  historyItemTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    flex: 1,
-    marginRight: spacing.sm,
-  },
-  emptyText: {
-    fontSize: 20,
-    textAlign: 'center',
-    marginTop: spacing.xl,
   },
 });

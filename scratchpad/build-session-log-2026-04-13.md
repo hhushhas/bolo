@@ -19,3 +19,7 @@
 - 10:18 PKT: Re-ran `pnpm lint`, `pnpm typecheck`, and `pnpm test` after the live wiring and emulator work; all passed.
 - 10:37 PKT: User clarified to preserve the newer visual direction and only repair missing functionality; started a minimal functional patch for preview, reader visibility, and copy/share behavior.
 - 10:42 PKT: Fixed the functional regression in the current design by restoring live YouTube preview fetch, showing the saved thumbnail in the reader, surfacing processing/failed states, and guarding copy/share until text is ready.
+- 10:52 PKT: Replaced the brittle Convex transcript fetch path with a direct YouTube caption parser fallback, added parser tests, and updated the current reading UI to show loading/error states instead of a blank panel.
+- 10:55 PKT: Moved transcript extraction to the client path as the primary route so the app can use the device network for YouTube captions, while keeping the Convex-side fetch as a fallback for non-client callers.
+- 10:57 PKT: Fixed the Convex action to accept client-provided transcript text safely by only passing persisted entry fields into the createEntry mutation, avoiding validator failures on the new payload.
+- 10:58 PKT: Verified the live Convex action now produces a ready entry for the previously failing MKBHD video when the client supplies transcript text, and refreshed the fresh emulator so the updated client bundle is available for retesting.
