@@ -177,7 +177,8 @@ const translateTranscript = async ({
   }
 
   const apiKey = process.env.OPENROUTER_API_KEY;
-  const model = process.env.OPENROUTER_TRANSLATION_MODEL ?? 'openai/gpt-4o-mini';
+  const model =
+    process.env.OPENROUTER_TRANSLATION_MODEL ?? 'google/gemma-4-26b-a4b-it';
 
   if (!apiKey) {
     throw new Error('Missing OPENROUTER_API_KEY in Convex environment variables.');

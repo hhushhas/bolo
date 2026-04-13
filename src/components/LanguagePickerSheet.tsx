@@ -4,6 +4,7 @@ import { spacing } from '../constants/theme';
 
 export function LanguagePickerSheet({
   colors,
+  options = languageOptions,
   onClose,
   onSelect,
   selectedCode,
@@ -18,6 +19,7 @@ export function LanguagePickerSheet({
     text: string;
     textSoft: string;
   };
+  options?: readonly { code: string; label: string }[];
   onClose: () => void;
   onSelect: (code: string) => void;
   selectedCode: string;
@@ -37,7 +39,7 @@ export function LanguagePickerSheet({
           </Text>
 
           <ScrollView contentContainerStyle={styles.list} showsVerticalScrollIndicator={false}>
-            {languageOptions.map((language) => {
+            {options.map((language) => {
               const selected = language.code === selectedCode;
 
               return (

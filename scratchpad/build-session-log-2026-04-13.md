@@ -23,3 +23,5 @@
 - 10:55 PKT: Moved transcript extraction to the client path as the primary route so the app can use the device network for YouTube captions, while keeping the Convex-side fetch as a fallback for non-client callers.
 - 10:57 PKT: Fixed the Convex action to accept client-provided transcript text safely by only passing persisted entry fields into the createEntry mutation, avoiding validator failures on the new payload.
 - 10:58 PKT: Verified the live Convex action now produces a ready entry for the previously failing MKBHD video when the client supplies transcript text, and refreshed the fresh emulator so the updated client bundle is available for retesting.
+- 11:06 PKT: Added a target-language picker back into the current input card so users can choose the translation language before transcribing, while keeping source language on automatic detection.
+- 11:08 PKT: Set the live OpenRouter translation model to google/gemma-4-26b-a4b-it, refreshed the app, and verified a new Convex entry can be translated into Urdu from the target-language picker.

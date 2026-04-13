@@ -16,7 +16,13 @@ import {
 import * as Clipboard from 'expo-clipboard';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import {
+  defaultTargetLanguage,
+  getLanguageLabel,
+  languageOptions,
+} from '../constants/languages';
 import { palette, spacing } from '../constants/theme';
+import { LanguagePickerSheet } from '../components/LanguagePickerSheet';
 import {
   buildWhatsAppShareUrl,
   fetchYouTubePreview,
@@ -53,8 +59,11 @@ export function HomeScreen({
   const [selectedEntryId, setSelectedEntryId] = useState<Doc<'entries'>['_id'] | null>(null);
   const [preview, setPreview] = useState<YouTubePreview | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const [targetLanguage, setTargetLanguage] = useState<string>(defaultTargetLanguage.code);
+  const [pickerVisible, setPickerVisible] = useState(false);
 
   const deferredUrl = useDeferredValue(url);
+  const targetLanguageOptions = languageOptions.filter((language) => language.code !== 'auto');
 
   // Handle YouTube Preview Fetching
   useEffect(() => {
@@ -103,8 +112,8 @@ export function HomeScreen({
       const entryId = await onTranscribe({
         sourceLanguage: 'auto',
         sourceLanguageLabel: 'Automatic',
-        targetLanguage: 'en',
-        targetLanguageLabel: 'English',
+        targetLanguage,
+        targetLanguageLabel: getLanguageLabel(targetLanguage),
         youtubeUrl: parsed.cleanUrl,
       });
 
@@ -141,51 +150,55 @@ export function HomeScreen({
           <Text style={[styles.headerTitle, { color: colors.text }]}>Reading Mode</Text>
         </View>
         
-        <ScrollView contentContainerStyle={styles.readingContent} showsVerticalScrollIndicator={false}>
-          <View style={styles.bookWrapper}>
-            <View style={[styles.readingPreviewCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-              <Image source={{ uri: selectedEntry.thumbnailUrl }} style={styles.readingPreviewThumb} />
-              <View style={styles.readingPreviewInfo}>
-                <Text style={[styles.previewBadge, { color: colors.accent }]}>
-                  {isFailed ? 'Could not transcribe' : isReady ? 'Ready to read' : 'Preparing transcript'}
-                </Text>
-                <Text numberOfLines={3} style={[styles.readingPreviewTitle, { color: colors.text }]}>
-                  {selectedEntry.title}
-                </Text>
-                <Text style={[styles.previewAuthor, { color: colors.textSoft }]}>
-                  {selectedEntry.channelTitle ?? 'YouTube'}
-                </Text>
+        <View style={styles.readingContainer}>
+          <ScrollView contentContainerStyle={styles.readingContent} showsVerticalScrollIndicator={false}>
+            <View style={styles.bookWrapper}>
+              <View style={[styles.readingPreviewCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
+                <Image source={{ uri: selectedEntry.thumbnailUrl }} style={styles.readingPreviewThumb} />
+                <View style={styles.readingPreviewInfo}>
+                  <Text style={[styles.previewBadge, { color: colors.accent }]}>
+                    {isFailed ? 'Could not transcribe' : isReady ? 'Ready to read' : 'Preparing transcript'}
+                  </Text>
+                  <Text numberOfLines={3} style={[styles.readingPreviewTitle, { color: colors.text }]}>
+                    {selectedEntry.title}
+                  </Text>
+                  <Text style={[styles.previewAuthor, { color: colors.textSoft }]}>
+                    {selectedEntry.channelTitle ?? 'YouTube'}
+                  </Text>
+                </View>
+              </View>
+
+              <Text style={[styles.videoTitle, { color: colors.text }]}>{selectedEntry.title}</Text>
+              <View style={[styles.textContainer, { backgroundColor: colors.reader, borderColor: colors.border }]}>
+                {isFailed ? (
+                  <View style={styles.statusWrap}>
+                    <MaterialCommunityIcons name="alert-circle-outline" size={36} color={colors.danger} />
+                    <Text style={[styles.statusTitle, { color: colors.danger }]}>We could not get the transcript</Text>
+                    <Text style={[styles.statusText, { color: colors.text }]}>
+                      {selectedEntry.errorMessage ?? 'Please try another video.'}
+                    </Text>
+                  </View>
+                ) : isReady ? (
+                  <Text selectable style={[styles.transcriptText, { color: colors.text }]}>
+                    {selectedText}
+                  </Text>
+                ) : (
+                  <View style={styles.statusWrap}>
+                    <ActivityIndicator size="large" color={colors.accent} />
+                    <Text style={[styles.statusTitle, { color: colors.text }]}>Preparing your transcript</Text>
+                    <Text style={[styles.statusText, { color: colors.textSoft }]}>
+                      Stay on this screen for a few seconds. The text will appear here as soon as it is ready.
+                    </Text>
+                  </View>
+                )}
               </View>
             </View>
+            {/* Added bottom padding so text can be scrolled fully above the sticky bar */}
+            <View style={{ height: 180 }} />
+          </ScrollView>
 
-            <Text style={[styles.videoTitle, { color: colors.text }]}>{selectedEntry.title}</Text>
-            <View style={[styles.textContainer, { backgroundColor: colors.reader, borderColor: colors.border }]}>
-              {isFailed ? (
-                <View style={styles.statusWrap}>
-                  <MaterialCommunityIcons name="alert-circle-outline" size={36} color={colors.danger} />
-                  <Text style={[styles.statusTitle, { color: colors.danger }]}>We could not get the transcript</Text>
-                  <Text style={[styles.statusText, { color: colors.text }]}>
-                    {selectedEntry.errorMessage ?? 'Please try another video.'}
-                  </Text>
-                </View>
-              ) : isReady ? (
-                <Text selectable style={[styles.transcriptText, { color: colors.text }]}>
-                  {selectedText}
-                </Text>
-              ) : (
-                <View style={styles.statusWrap}>
-                  <ActivityIndicator size="large" color={colors.accent} />
-                  <Text style={[styles.statusTitle, { color: colors.text }]}>Preparing your transcript</Text>
-                  <Text style={[styles.statusText, { color: colors.textSoft }]}>
-                    Stay on this screen for a few seconds. The text will appear here as soon as it is ready.
-                  </Text>
-                </View>
-              )}
-            </View>
-          </View>
-
-          <View style={styles.toolbelt}>
-            <Text style={[styles.toolbeltLabel, { color: colors.textSoft }]}>SHARE OR SAVE THIS TEXT</Text>
+          <View style={[styles.stickyToolbelt, { backgroundColor: colors.background, borderTopWidth: 3, borderColor: colors.border }]}>
+            <Text style={[styles.toolbeltLabel, { color: colors.textSoft }]}>READY TO SHARE?</Text>
             <View style={styles.toolbeltRow}>
               <Pressable 
                 onPress={() => {
@@ -193,7 +206,6 @@ export function HomeScreen({
                     Alert.alert('Not ready yet', 'Please wait until the transcript appears before sharing.');
                     return;
                   }
-
                   Linking.openURL(buildWhatsAppShareUrl(`Check out this video: ${selectedEntry.title}\n\n${selectedText}`));
                 }}
                 style={({ pressed }) => [
@@ -212,7 +224,6 @@ export function HomeScreen({
                     Alert.alert('Not ready yet', 'Please wait until the transcript appears before copying.');
                     return;
                   }
-
                   await Clipboard.setStringAsync(selectedText);
                   Alert.alert('Copied!', 'The text is ready to paste anywhere.');
                 }}
@@ -227,7 +238,7 @@ export function HomeScreen({
               </Pressable>
             </View>
           </View>
-        </ScrollView>
+        </View>
       </SafeAreaView>
     );
   };
@@ -330,6 +341,25 @@ export function HomeScreen({
               </View>
             ) : null}
 
+            <Pressable
+              onPress={() => setPickerVisible(true)}
+              style={({ pressed }) => [
+                styles.languageCard,
+                {
+                  backgroundColor: pressed ? colors.surfaceStrong : colors.backgroundAccent,
+                  borderColor: colors.border,
+                },
+              ]}
+            >
+              <View style={styles.languageCardCopy}>
+                <Text style={[styles.languageCardLabel, { color: colors.textSoft }]}>Translate to</Text>
+                <Text style={[styles.languageCardValue, { color: colors.text }]}>
+                  {getLanguageLabel(targetLanguage)}
+                </Text>
+              </View>
+              <MaterialCommunityIcons name="chevron-down" size={28} color={colors.text} />
+            </Pressable>
+
             <View style={styles.buttonContainer}>
               <Pressable 
                 onPress={handleReadVideo}
@@ -372,6 +402,15 @@ export function HomeScreen({
           </Pressable>
         </View>
       </ScrollView>
+      <LanguagePickerSheet
+        colors={colors}
+        onClose={() => setPickerVisible(false)}
+        onSelect={(code) => setTargetLanguage(code)}
+        options={targetLanguageOptions}
+        selectedCode={targetLanguage}
+        title="Choose translation language"
+        visible={pickerVisible}
+      />
     </SafeAreaView>
   );
 }
@@ -511,6 +550,28 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  languageCard: {
+    alignItems: 'center',
+    borderRadius: 16,
+    borderWidth: 3,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    minHeight: 76,
+    paddingHorizontal: spacing.md,
+  },
+  languageCardCopy: {
+    gap: 4,
+  },
+  languageCardLabel: {
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  languageCardValue: {
+    fontSize: 22,
+    fontWeight: '800',
+  },
   buttonContainer: {
     marginTop: spacing.xs,
     position: 'relative',
@@ -542,6 +603,9 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontWeight: '900',
     letterSpacing: 1,
+  },
+  readingContainer: {
+    flex: 1,
   },
   readingContent: {
     padding: spacing.md,
@@ -609,6 +673,12 @@ const styles = StyleSheet.create({
   toolbelt: {
     marginTop: spacing.xl,
     gap: spacing.md,
+  },
+  stickyToolbelt: {
+    gap: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.md,
   },
   toolbeltLabel: {
     fontSize: 14,
