@@ -25,3 +25,4 @@
 - 10:58 PKT: Verified the live Convex action now produces a ready entry for the previously failing MKBHD video when the client supplies transcript text, and refreshed the fresh emulator so the updated client bundle is available for retesting.
 - 11:06 PKT: Added a target-language picker back into the current input card so users can choose the translation language before transcribing, while keeping source language on automatic detection.
 - 11:08 PKT: Set the live OpenRouter translation model to google/gemma-4-26b-a4b-it, refreshed the app, and verified a new Convex entry can be translated into Urdu from the target-language picker.
+- 11:13 PKT: Replaced raw technical transcript errors in the reading screen with plain-language, kind explanations and next-step guidance, and matched the copy/share alerts to the same friendly messaging.

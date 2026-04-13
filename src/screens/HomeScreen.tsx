@@ -34,6 +34,60 @@ import type { Doc } from '../../convex/_generated/dataModel';
 const { width } = Dimensions.get('window');
 const isSmallDevice = width < 375;
 
+const getFriendlyFailureCopy = (errorMessage?: string) => {
+  if (!errorMessage) {
+    return {
+      body: 'We could not turn this video into text this time.',
+      hint: 'Please try another video, or try this one again in a little while.',
+      title: 'We could not read this video yet',
+    };
+  }
+
+  const normalized = errorMessage.toLowerCase();
+
+  if (
+    normalized.includes('transcript is disabled') ||
+    normalized.includes('no transcript track was exposed') ||
+    normalized.includes('no transcripts are available')
+  ) {
+    return {
+      body: 'This YouTube video does not seem to offer captions we can read.',
+      hint: 'Please try a different video, or use a version of this video that has captions turned on.',
+      title: 'This video does not have readable captions',
+    };
+  }
+
+  if (normalized.includes('valid youtube video or shorts link')) {
+    return {
+      body: 'The link does not look like a full YouTube video link.',
+      hint: 'Please go back, copy the full link from YouTube, and paste it again.',
+      title: 'The link needs another look',
+    };
+  }
+
+  if (normalized.includes('video is no longer available')) {
+    return {
+      body: 'This video is not available to open right now.',
+      hint: 'Please try another video, or come back later if the video becomes available again.',
+      title: 'This video is not available right now',
+    };
+  }
+
+  if (normalized.includes('too many requests') || normalized.includes('captcha')) {
+    return {
+      body: 'YouTube is asking us to slow down for a moment.',
+      hint: 'Please wait a little and try again soon.',
+      title: 'YouTube is busy right now',
+    };
+  }
+
+  return {
+    body: 'Something went wrong while we were reading this video.',
+    hint: 'Please try again, or choose another video if this one keeps failing.',
+    title: 'We hit a small problem',
+  };
+};
+
 export function HomeScreen({
   backendReady,
   entries,
@@ -139,6 +193,7 @@ export function HomeScreen({
     const selectedText = selectedEntry.translationText || selectedEntry.transcriptText || '';
     const isReady = selectedEntry.status === 'ready' && Boolean(selectedText);
     const isFailed = selectedEntry.status === 'failed';
+    const failureCopy = getFriendlyFailureCopy(selectedEntry.errorMessage);
 
     return (
       <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
@@ -173,9 +228,12 @@ export function HomeScreen({
                 {isFailed ? (
                   <View style={styles.statusWrap}>
                     <MaterialCommunityIcons name="alert-circle-outline" size={36} color={colors.danger} />
-                    <Text style={[styles.statusTitle, { color: colors.danger }]}>We could not get the transcript</Text>
+                    <Text style={[styles.statusTitle, { color: colors.danger }]}>{failureCopy.title}</Text>
                     <Text style={[styles.statusText, { color: colors.text }]}>
-                      {selectedEntry.errorMessage ?? 'Please try another video.'}
+                      {failureCopy.body}
+                    </Text>
+                    <Text style={[styles.statusHint, { color: colors.textSoft }]}>
+                      {failureCopy.hint}
                     </Text>
                   </View>
                 ) : isReady ? (
@@ -203,7 +261,12 @@ export function HomeScreen({
               <Pressable 
                 onPress={() => {
                   if (!isReady) {
-                    Alert.alert('Not ready yet', 'Please wait until the transcript appears before sharing.');
+                    if (isFailed) {
+                      Alert.alert(failureCopy.title, `${failureCopy.body}\n\n${failureCopy.hint}`);
+                      return;
+                    }
+
+                    Alert.alert('Still working', 'Please wait a little longer while we prepare the text.');
                     return;
                   }
                   Linking.openURL(buildWhatsAppShareUrl(`Check out this video: ${selectedEntry.title}\n\n${selectedText}`));
@@ -221,7 +284,12 @@ export function HomeScreen({
               <Pressable 
                 onPress={async () => {
                   if (!isReady) {
-                    Alert.alert('Not ready yet', 'Please wait until the transcript appears before copying.');
+                    if (isFailed) {
+                      Alert.alert(failureCopy.title, `${failureCopy.body}\n\n${failureCopy.hint}`);
+                      return;
+                    }
+
+                    Alert.alert('Still working', 'Please wait a little longer while we prepare the text.');
                     return;
                   }
                   await Clipboard.setStringAsync(selectedText);
@@ -663,6 +731,11 @@ const styles = StyleSheet.create({
   statusText: {
     fontSize: 20,
     lineHeight: 30,
+    textAlign: 'center',
+  },
+  statusHint: {
+    fontSize: 18,
+    lineHeight: 28,
     textAlign: 'center',
   },
   transcriptText: {
