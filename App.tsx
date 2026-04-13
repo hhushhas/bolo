@@ -62,10 +62,13 @@ function ConnectedApp() {
           }
 
           void processEntry({
-            ...args,
-            entryId,
             detectedLanguageCode:
               transcriptLines?.find((line) => line.lang)?.lang ?? args.sourceLanguage,
+            entryId,
+            sourceLanguage: args.sourceLanguage,
+            sourceLanguageLabel: args.sourceLanguageLabel,
+            targetLanguage: args.targetLanguage,
+            targetLanguageLabel: args.targetLanguageLabel,
             transcriptText: transcriptLines ? normalizeTranscriptLines(transcriptLines) : undefined,
             youtubeUrl: parsed.cleanUrl,
           }).catch((error) => {

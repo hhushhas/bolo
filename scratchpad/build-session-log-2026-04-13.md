@@ -28,3 +28,4 @@
 - 11:13 PKT: Replaced raw technical transcript errors in the reading screen with plain-language, kind explanations and next-step guidance, and matched the copy/share alerts to the same friendly messaging.
 - 11:33 PKT: Expanded the reader flow substantially: immediate queued entries with live progress stages, favorites/search in history, transcript-versus-translation switching, richer copy/share actions, language presets, and backend-generated summary/chapter data with graceful fallbacks.
 - 11:36 PKT: Deployed the richer queue-and-process flow, verified a live entry progresses through processing to ready with Urdu translation plus summary and chapter notes, and refreshed the fresh Android emulator to the new home screen with language presets and picker.
+- 11:46 PKT: Fixed a live Convex validator mismatch by trimming the client processEntry payload down to only the fields that the action accepts, after confirming the exact extra-field error from deployment logs.
