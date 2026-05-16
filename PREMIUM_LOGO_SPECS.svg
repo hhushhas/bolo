@@ -1,0 +1,26 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background Layer (Soft Cream Paper) -->
+  <rect width="1024" height="1024" rx="200" fill="#f9f5d7"/>
+  
+  <!-- Content Group with -4 degree tilt -->
+  <g transform="translate(512, 512) rotate(-4) translate(-512, -512)">
+    <!-- Book Shadow Layer -->
+    <path d="M780 320C780 286.863 753.137 260 720 260H304C270.863 260 244 286.863 244 320V736C244 769.137 270.863 796 304 796H720C753.137 796 780 769.137 780 732V320Z" fill="#3c3836" opacity="0.1"/>
+    
+    <!-- Main Book Path (Deep Vermilion) -->
+    <!-- Simplified SVG path representing the "book-open-page-variant" -->
+    <path d="M512 360L320 280V680L512 760L704 680V280L512 360ZM480 700L352 648V344L480 396V700ZM672 648L544 700V396L672 344V648Z" fill="#af3a03"/>
+    
+    <!-- Page Accents -->
+    <rect x="370" y="420" width="80" height="8" rx="4" fill="#f2e5bc" opacity="0.6"/>
+    <rect x="370" y="460" width="80" height="8" rx="4" fill="#f2e5bc" opacity="0.6"/>
+    <rect x="370" y="500" width="60" height="8" rx="4" fill="#f2e5bc" opacity="0.6"/>
+    
+    <rect x="574" y="420" width="80" height="8" rx="4" fill="#f2e5bc" opacity="0.6"/>
+    <rect x="574" y="460" width="80" height="8" rx="4" fill="#f2e5bc" opacity="0.6"/>
+    <rect x="574" y="500" width="60" height="8" rx="4" fill="#f2e5bc" opacity="0.6"/>
+  </g>
+  
+  <!-- Thick Premium Border -->
+  <rect x="20" y="20" width="984" height="984" rx="180" stroke="#3c3836" stroke-width="40"/>
+</svg>

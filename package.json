@@ -19,6 +19,7 @@
     "convex": "^1.35.1",
     "expo": "~54.0.33",
     "expo-clipboard": "^55.0.13",
+    "expo-haptics": "^55.0.14",
     "expo-linear-gradient": "^55.0.13",
     "expo-status-bar": "~3.0.9",
     "react": "19.1.0",
@@ -33,6 +34,7 @@
     "@types/react": "~19.1.0",
     "eslint": "^9.39.4",
     "eslint-config-expo": "^55.0.0",
+    "sharp": "^0.34.5",
     "typescript": "~5.9.2",
     "vitest": "^4.1.4"
   },
