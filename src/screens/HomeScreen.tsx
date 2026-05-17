@@ -204,15 +204,41 @@ export function HomeScreen({
   const renderReadingView = () => {
     if (!selectedEntry) return null;
 
-    const syncedReady = selectedEntry.processingVersion === 2 && syncedSegments.length > 0;
+    const syncedEntry = selectedEntry.processingVersion === 2;
 
-    if (syncedReady) {
+    if (syncedEntry) {
       return (
         <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
           <SyncedVideoPlayer
             activeMs={playerActiveMs}
             colors={colors}
             debugReport={syncedDebugReport}
+            emptyTranscriptContent={
+              <View style={styles.syncedEmptyState}>
+                {selectedEntry.status === 'failed' ? (
+                  <>
+                    <MaterialCommunityIcons name="alert-circle-outline" size={34} color={colors.danger} />
+                    <Text style={[styles.statusTitle, { color: colors.danger }]}>{failureCopy.title}</Text>
+                    <Text style={[styles.statusBody, { color: colors.textSoft }]}>{failureCopy.body}</Text>
+                    <Pressable
+                      onPress={() => handleReadVideo(selectedEntry)}
+                      style={[styles.inlineActionButton, { backgroundColor: colors.accent, borderColor: colors.border }]}
+                    >
+                      <MaterialCommunityIcons color="#fff" name="refresh" size={18} />
+                      <Text style={styles.inlineActionText}>Try Again</Text>
+                    </Pressable>
+                  </>
+                ) : (
+                  <>
+                    <ActivityIndicator size="large" color={colors.accent} />
+                    <Text style={[styles.statusTitle, { color: colors.text }]}>Preparing synced player...</Text>
+                    <Text style={[styles.statusBody, { color: colors.textSoft }]}>
+                      {selectedEntry.processingStage ?? 'We are preparing the video, transcript, and translation.'}
+                    </Text>
+                  </>
+                )}
+              </View>
+            }
             onSeek={handlePlayerSeek}
             segments={syncedSegments}
             topLeftControls={
@@ -346,8 +372,13 @@ export function HomeScreen({
             <Pressable
               key={entry._id}
               onPress={() => {
-                onSelectEntry(entry._id);
-                setView('reading');
+                if (entry.processingVersion === 2) {
+                  onSelectEntry(entry._id);
+                  setView('reading');
+                  return;
+                }
+
+                void handleReadVideo(entry);
               }}
               style={[styles.historyItem, { backgroundColor: colors.surface, borderColor: colors.border }]}
             >
@@ -600,6 +631,7 @@ const styles = StyleSheet.create({
   stepNumber: { alignItems: 'center', borderRadius: 8, height: 32, justifyContent: 'center', width: 32 },
   stepNumberText: { color: '#FFF', fontSize: 18, fontWeight: '900' },
   stickyToolbelt: { gap: spacing.md, paddingBottom: spacing.lg, paddingHorizontal: spacing.md, paddingTop: spacing.md },
+  syncedEmptyState: { alignItems: 'center', flex: 1, gap: spacing.sm, justifyContent: 'center', padding: spacing.md },
   subtitle: { fontSize: isSmallDevice ? 18 : 22, lineHeight: 30, paddingHorizontal: spacing.md, textAlign: 'center' },
   textContainer: { borderRadius: 20, borderWidth: 3, minHeight: 360, padding: spacing.lg },
   title: { fontSize: isSmallDevice ? 32 : 44, fontWeight: '900', letterSpacing: -1, textAlign: 'center' },

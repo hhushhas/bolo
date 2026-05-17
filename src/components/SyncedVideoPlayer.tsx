@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
   Modal,
   Pressable,
   ScrollView,
@@ -27,6 +28,7 @@ type SyncedVideoPlayerProps = {
     textSoft: string;
   };
   debugReport?: ProcessingDebugReport;
+  emptyTranscriptContent?: React.ReactNode;
   onSeek: (timeMs: number) => void;
   segments: DisplayTranscriptSegment[];
   topLeftControls?: React.ReactNode;
@@ -46,6 +48,7 @@ export function SyncedVideoPlayer({
   activeMs,
   colors,
   debugReport,
+  emptyTranscriptContent,
   onSeek,
   segments,
   topLeftControls,
@@ -112,9 +115,18 @@ export function SyncedVideoPlayer({
 
   const transcript = (
     <View style={styles.transcriptPanel}>
-      <ScrollView ref={scrollRef} contentContainerStyle={styles.segmentList} showsVerticalScrollIndicator={false}>
-        {segments.map(renderSegment)}
-      </ScrollView>
+      {segments.length > 0 ? (
+        <ScrollView ref={scrollRef} contentContainerStyle={styles.segmentList} showsVerticalScrollIndicator={false}>
+          {segments.map(renderSegment)}
+        </ScrollView>
+      ) : (
+        emptyTranscriptContent ?? (
+          <View style={styles.emptyTranscript}>
+            <ActivityIndicator color={colors.accent} size="large" />
+            <Text style={[styles.emptyTranscriptTitle, { color: colors.text }]}>Preparing translation...</Text>
+          </View>
+        )
+      )}
     </View>
   );
 
@@ -250,6 +262,18 @@ const styles = StyleSheet.create({
   debugTitle: {
     fontSize: 24,
     fontWeight: '900',
+  },
+  emptyTranscript: {
+    alignItems: 'center',
+    flex: 1,
+    gap: spacing.sm,
+    justifyContent: 'center',
+    padding: spacing.lg,
+  },
+  emptyTranscriptTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    textAlign: 'center',
   },
   landscapeContainer: {
     flexDirection: 'row',

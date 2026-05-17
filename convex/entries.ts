@@ -185,7 +185,7 @@ export const queueSyncedEntry = mutation({
   handler: async (ctx, args) => {
     const entryId = await ctx.db.insert('entries', {
       ...args,
-      favorite: false,
+      favorite: true,
       processingVersion: 2,
       status: 'queued',
       translationStatus: 'pending',
