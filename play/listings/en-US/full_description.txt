@@ -1,0 +1,18 @@
+Bolo is a bilingual video translation app for watching YouTube videos with a synced transcript and readable translation beside the video.
+
+Paste a YouTube link, choose your languages, and Bolo prepares a timestamped transcript so you can watch, listen, and read in rhythm with the speaker.
+
+Features:
+• Synced video player: watch the video while the active transcript segment follows along.
+• Bilingual reading: compare original speech with translated text in a calm, readable layout.
+• Tap to seek: jump to a moment by tapping the transcript segment.
+• Portrait and landscape support: make more room for the video or the translation when you need it.
+• Saved history: return to videos you have already processed.
+• Processing status: see when audio is being prepared, transcribed, translated, and cleaned up.
+• Debug cost view: inspect Cloudflare and OpenRouter processing details when needed.
+
+Bolo is designed for learners, families, and anyone who wants a quieter way to understand video in another language. It keeps the interface simple and lets the video and translation do the work.
+
+Download Bolo to watch YouTube videos with synced bilingual captions, translated transcripts, and a reading experience that stays aligned with the audio.
+
+Bolo supports video translation, transcript translation, language learning, bilingual captions, synced subtitles, and YouTube transcript reading.

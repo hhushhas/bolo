@@ -23,7 +23,7 @@
       },
       "edgeToEdgeEnabled": true,
       "predictiveBackGestureEnabled": false,
-      "package": "com.anonymous.bolotranscriber"
+      "package": "com.q9labsai.bolo"
     },
     "web": {
       "favicon": "./assets/favicon.png"
