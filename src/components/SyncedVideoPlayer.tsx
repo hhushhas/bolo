@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -13,11 +13,10 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { spacing } from '../constants/theme';
 import { buildDebugReportText, type DisplayTranscriptSegment, type ProcessingDebugReport } from '../lib/syncedTranscript';
 
-type PlayerMode = 'bilingual' | 'original' | 'translation';
+type LandscapeMode = 'split' | 'overlay';
 
 type SyncedVideoPlayerProps = {
   activeMs: number;
-  autoScrollEnabled: boolean;
   colors: {
     accent: string;
     background: string;
@@ -30,18 +29,8 @@ type SyncedVideoPlayerProps = {
     textSoft: string;
   };
   debugReport?: ProcessingDebugReport;
-  durationMs: number;
-  isPlaying: boolean;
-  mode: PlayerMode;
-  onChangeMode: (mode: PlayerMode) => void;
   onSeek: (timeMs: number) => void;
-  onSeekBy: (offsetMs: number) => void;
-  onToggleAutoScroll: () => void;
-  onTogglePlaying: () => void;
-  playbackRate: number;
   segments: DisplayTranscriptSegment[];
-  setPlaybackRate: (rate: number) => void;
-  title: string;
   videoSlot?: React.ReactNode;
 };
 
@@ -53,29 +42,18 @@ const formatClock = (timeMs: number) => {
   return `${minutes}:${seconds.toString().padStart(2, '0')}`;
 };
 
-const playbackRates = [0.75, 1, 1.25, 1.5] as const;
-
 export function SyncedVideoPlayer({
   activeMs,
-  autoScrollEnabled,
   colors,
   debugReport,
-  durationMs,
-  isPlaying,
-  mode,
-  onChangeMode,
   onSeek,
-  onSeekBy,
-  onToggleAutoScroll,
-  onTogglePlaying,
-  playbackRate,
   segments,
-  setPlaybackRate,
-  title,
   videoSlot,
 }: SyncedVideoPlayerProps) {
   const { height, width } = useWindowDimensions();
   const [debugVisible, setDebugVisible] = useState(false);
+  const [landscapeMode, setLandscapeMode] = useState<LandscapeMode>('split');
+  const scrollRef = useRef<ScrollView | null>(null);
   const landscape = width > height;
   const activeSegmentIndex = Math.max(
     0,
@@ -86,27 +64,17 @@ export function SyncedVideoPlayer({
     () => (debugReport ? buildDebugReportText(debugReport) : ''),
     [debugReport],
   );
+  const overlaySegments = useMemo(
+    () => segments.slice(activeSegmentIndex, activeSegmentIndex + 2),
+    [activeSegmentIndex, segments],
+  );
 
-  const renderModeButton = (nextMode: PlayerMode, label: string) => {
-    const selected = mode === nextMode;
-
-    return (
-      <Pressable
-        onPress={() => onChangeMode(nextMode)}
-        style={[
-          styles.modeButton,
-          {
-            backgroundColor: selected ? colors.accent : colors.surface,
-            borderColor: selected ? colors.accent : colors.border,
-          },
-        ]}
-      >
-        <Text style={[styles.modeButtonText, { color: selected ? colors.reader : colors.text }]}>
-          {label}
-        </Text>
-      </Pressable>
-    );
-  };
+  useEffect(() => {
+    scrollRef.current?.scrollTo({
+      animated: true,
+      y: Math.max(0, activeSegmentIndex * (landscape ? 74 : 92) - 24),
+    });
+  }, [activeSegmentIndex, landscape]);
 
   const renderSegment = (segment: DisplayTranscriptSegment, index: number) => {
     const active = index === activeSegmentIndex;
@@ -127,132 +95,76 @@ export function SyncedVideoPlayer({
         <Text style={[styles.segmentTime, { color: active ? colors.accent : colors.textSoft }]}>
           {formatClock(segment.startMs)}
         </Text>
-        {mode !== 'translation' ? (
-          <Text style={[styles.originalText, { color: colors.text }]}>
-            {segment.originalText}
-          </Text>
-        ) : null}
-        {mode !== 'original' ? (
-          <Text style={[styles.translationText, { color: colors.text }]}>
-            {segment.translatedText || segment.originalText}
-          </Text>
-        ) : null}
+        <Text style={[styles.translationText, { color: colors.text }]}>
+          {segment.translatedText || segment.originalText}
+        </Text>
       </Pressable>
     );
   };
 
   const player = (
-    <View style={[styles.playerPanel, { backgroundColor: colors.reader, borderColor: colors.border }]}>
+    <View style={[styles.playerPanel, { backgroundColor: colors.background }]}>
       {videoSlot ?? (
         <View style={[styles.videoPlaceholder, { backgroundColor: colors.backgroundAccent }]}>
           <MaterialCommunityIcons name="youtube" size={48} color={colors.accent} />
           <Text style={[styles.videoPlaceholderText, { color: colors.text }]}>YouTube Player</Text>
         </View>
       )}
-
-      <View style={styles.progressRow}>
-        <Text style={[styles.clockText, { color: colors.textSoft }]}>{formatClock(activeMs)}</Text>
-        <View style={[styles.progressTrack, { backgroundColor: colors.backgroundAccent, borderColor: colors.border }]}>
-          <View
-            style={[
-              styles.progressFill,
-              {
-                backgroundColor: colors.accent,
-                width: `${Math.min(100, Math.max(0, (activeMs / Math.max(1, durationMs)) * 100))}%`,
-              },
-            ]}
-          />
-        </View>
-        <Text style={[styles.clockText, { color: colors.textSoft }]}>{formatClock(durationMs)}</Text>
-      </View>
-
-      <View style={styles.controlRow}>
-        <Pressable onPress={() => onSeekBy(-10_000)} style={[styles.iconButton, { borderColor: colors.border }]}>
-          <MaterialCommunityIcons name="rewind-10" size={26} color={colors.text} />
-        </Pressable>
-        <Pressable
-          onPress={onTogglePlaying}
-          style={[styles.playButton, { backgroundColor: colors.accent, borderColor: colors.border }]}
-        >
-          <MaterialCommunityIcons name={isPlaying ? 'pause' : 'play'} size={30} color="#fff" />
-        </Pressable>
-        <Pressable onPress={() => onSeekBy(10_000)} style={[styles.iconButton, { borderColor: colors.border }]}>
-          <MaterialCommunityIcons name="fast-forward-10" size={26} color={colors.text} />
-        </Pressable>
-      </View>
     </View>
   );
 
+  const layoutToggle = landscape ? (
+    <Pressable
+      accessibilityLabel={landscapeMode === 'split' ? 'Show translation over video' : 'Show translation beside video'}
+      onPress={() => setLandscapeMode((current) => (current === 'split' ? 'overlay' : 'split'))}
+      style={[styles.layoutToggle, { backgroundColor: colors.surface, borderColor: colors.border }]}
+    >
+      <MaterialCommunityIcons
+        name={landscapeMode === 'split' ? 'image-text' : 'view-split-vertical'}
+        size={22}
+        color={colors.text}
+      />
+    </Pressable>
+  ) : null;
+
+  const overlayCaption = landscape && landscapeMode === 'overlay' ? (
+    <View style={styles.overlayCaptionWrap} pointerEvents="box-none">
+      <View style={styles.overlayCaptionPanel}>
+        {overlaySegments.map((segment, index) => (
+          <Pressable
+            key={`${segment.index}-${segment.startMs}-overlay`}
+            onPress={() => onSeek(segment.startMs)}
+            style={index === 0 ? styles.overlayActiveSegment : styles.overlayNextSegment}
+          >
+            <Text style={[styles.overlayTime, { color: index === 0 ? colors.accent : '#d9d0a7' }]}>
+              {formatClock(segment.startMs)}
+            </Text>
+            <Text
+              numberOfLines={index === 0 ? 2 : 1}
+              style={[styles.overlayText, { color: colors.reader, opacity: index === 0 ? 1 : 0.82 }]}
+            >
+              {segment.translatedText || segment.originalText}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+    </View>
+  ) : null;
+
   const transcript = (
     <View style={styles.transcriptPanel}>
-      <View style={styles.titleRow}>
-        <View style={styles.titleBlock}>
-          <Text numberOfLines={2} style={[styles.title, { color: colors.text }]}>
-            {title}
-          </Text>
-          <Text style={[styles.subtitle, { color: colors.textSoft }]}>
-            {segments.length} synced segments
-          </Text>
-        </View>
-        {debugReport ? (
+      {debugReport ? (
+        <View style={styles.infoRow}>
           <Pressable
             onPress={() => setDebugVisible(true)}
             style={[styles.infoButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
           >
             <MaterialCommunityIcons name="information-outline" size={22} color={colors.text} />
           </Pressable>
-        ) : null}
-      </View>
-
-      <View style={styles.toolbarRow}>
-        <View style={styles.modeRow}>
-          {renderModeButton('bilingual', 'Bilingual')}
-          {renderModeButton('original', 'Original')}
-          {renderModeButton('translation', 'Translation')}
         </View>
+      ) : null}
 
-        <View style={styles.smallControlsRow}>
-          <Pressable
-            onPress={onToggleAutoScroll}
-            style={[styles.compactButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
-          >
-            <MaterialCommunityIcons
-              name={autoScrollEnabled ? 'format-vertical-align-center' : 'gesture-swipe-vertical'}
-              size={18}
-              color={colors.text}
-            />
-            <Text style={[styles.compactButtonText, { color: colors.text }]}>
-              Auto-scroll {autoScrollEnabled ? 'on' : 'off'}
-            </Text>
-          </Pressable>
-
-          <View style={styles.rateRow}>
-            {playbackRates.map((rate) => {
-              const selected = playbackRate === rate;
-
-              return (
-                <Pressable
-                  key={rate}
-                  onPress={() => setPlaybackRate(rate)}
-                  style={[
-                    styles.rateButton,
-                    {
-                      backgroundColor: selected ? colors.accent : colors.surface,
-                      borderColor: selected ? colors.accent : colors.border,
-                    },
-                  ]}
-                >
-                  <Text style={[styles.rateText, { color: selected ? colors.reader : colors.text }]}>
-                    {rate}x
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-        </View>
-      </View>
-
-      <ScrollView contentContainerStyle={styles.segmentList} showsVerticalScrollIndicator={false}>
+      <ScrollView ref={scrollRef} contentContainerStyle={styles.segmentList} showsVerticalScrollIndicator={false}>
         {segments.map(renderSegment)}
       </ScrollView>
     </View>
@@ -266,9 +178,26 @@ export function SyncedVideoPlayer({
         { backgroundColor: colors.background },
       ]}
     >
-      {landscape ? (
+      {landscape && landscapeMode === 'overlay' ? (
+        <View style={styles.overlayPlayer}>
+          {player}
+          {layoutToggle}
+          {debugReport ? (
+            <Pressable
+              onPress={() => setDebugVisible(true)}
+              style={[styles.overlayInfoButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
+            >
+              <MaterialCommunityIcons name="information-outline" size={22} color={colors.text} />
+            </Pressable>
+          ) : null}
+          {overlayCaption}
+        </View>
+      ) : landscape ? (
         <>
-          <View style={styles.landscapePlayer}>{player}</View>
+          <View style={styles.landscapePlayer}>
+            {player}
+            {layoutToggle}
+          </View>
           <View style={styles.landscapeTranscript}>{transcript}</View>
         </>
       ) : (
@@ -307,12 +236,6 @@ export function SyncedVideoPlayer({
 }
 
 const styles = StyleSheet.create({
-  clockText: {
-    fontSize: 15,
-    fontWeight: '800',
-    minWidth: 48,
-    textAlign: 'center',
-  },
   closeButton: {
     alignItems: 'center',
     height: 42,
@@ -334,13 +257,7 @@ const styles = StyleSheet.create({
   },
   container: {
     flex: 1,
-    gap: spacing.sm,
-  },
-  controlRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: spacing.sm,
-    justifyContent: 'center',
+    gap: spacing.xs,
   },
   copyButton: {
     alignItems: 'center',
@@ -376,14 +293,6 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '900',
   },
-  iconButton: {
-    alignItems: 'center',
-    borderRadius: 14,
-    borderWidth: 2,
-    height: 42,
-    justifyContent: 'center',
-    width: 50,
-  },
   infoButton: {
     alignItems: 'center',
     borderRadius: 14,
@@ -392,15 +301,34 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 44,
   },
+  infoRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    minHeight: 44,
+  },
   landscapeContainer: {
     flexDirection: 'row',
-    padding: spacing.sm,
+    padding: spacing.xs,
   },
   landscapePlayer: {
-    flex: 1.15,
+    flex: 1.25,
+    position: 'relative',
   },
   landscapeTranscript: {
     flex: 1,
+  },
+  layoutToggle: {
+    alignItems: 'center',
+    borderRadius: 12,
+    borderWidth: 1,
+    height: 42,
+    justifyContent: 'center',
+    position: 'absolute',
+    right: spacing.xs,
+    top: spacing.xs,
+    width: 42,
+    zIndex: 3,
   },
   modalBackdrop: {
     alignItems: 'center',
@@ -409,94 +337,76 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: spacing.md,
   },
-  modeButton: {
-    alignItems: 'center',
-    borderRadius: 14,
-    borderWidth: 2,
-    justifyContent: 'center',
-    minHeight: 44,
-    minWidth: 112,
-    paddingHorizontal: 8,
-  },
-  modeButtonText: {
-    fontSize: 14,
-    fontWeight: '900',
-  },
-  modeRow: {
-    flexDirection: 'row',
-    flexGrow: 1,
-    flexWrap: 'wrap',
-    gap: spacing.xs,
-  },
-  originalText: {
-    fontSize: 18,
-    fontWeight: '800',
-    lineHeight: 26,
-  },
-  playButton: {
-    alignItems: 'center',
-    borderRadius: 16,
-    borderWidth: 3,
-    height: 48,
-    justifyContent: 'center',
-    width: 60,
-  },
   playerPanel: {
-    borderRadius: 20,
-    borderWidth: 3,
-    gap: spacing.sm,
-    overflow: 'hidden',
-    padding: spacing.sm,
-  },
-  portraitContainer: {
-    padding: spacing.md,
-  },
-  progressFill: {
-    borderRadius: 999,
-    height: '100%',
-  },
-  progressRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
     gap: spacing.xs,
-  },
-  progressTrack: {
-    borderRadius: 999,
-    borderWidth: 2,
-    flex: 1,
-    height: 14,
     overflow: 'hidden',
   },
-  rateButton: {
+  overlayActiveSegment: {
+    gap: 3,
+  },
+  overlayCaptionPanel: {
+    backgroundColor: 'rgba(24, 25, 25, 0.82)',
+    borderRadius: 8,
+    gap: 8,
+    maxWidth: 720,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    width: '86%',
+  },
+  overlayCaptionWrap: {
+    alignItems: 'center',
+    bottom: 54,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+    zIndex: 2,
+  },
+  overlayInfoButton: {
     alignItems: 'center',
     borderRadius: 12,
-    borderWidth: 2,
-    minHeight: 36,
-    minWidth: 52,
+    borderWidth: 1,
+    height: 42,
     justifyContent: 'center',
+    position: 'absolute',
+    right: spacing.xs,
+    top: spacing.xs + 48,
+    width: 42,
+    zIndex: 3,
   },
-  rateRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
+  overlayNextSegment: {
+    gap: 2,
   },
-  rateText: {
-    fontSize: 15,
+  overlayPlayer: {
+    flex: 1,
+    position: 'relative',
+  },
+  overlayText: {
+    fontSize: 18,
+    fontWeight: '800',
+    lineHeight: 24,
+  },
+  overlayTime: {
+    fontSize: 12,
     fontWeight: '900',
   },
+  portraitContainer: {
+    paddingHorizontal: 0,
+    paddingVertical: spacing.xs,
+  },
   segment: {
-    borderLeftWidth: 6,
-    borderRadius: 16,
+    borderLeftWidth: 4,
+    borderRadius: 8,
     borderWidth: 0,
-    gap: 6,
-    padding: spacing.sm,
+    gap: 4,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 10,
   },
   segmentList: {
-    gap: spacing.sm,
-    paddingBottom: spacing.xl,
+    gap: 4,
+    paddingBottom: spacing.lg,
   },
   segmentTime: {
-    fontSize: 15,
+    fontSize: 12,
     fontWeight: '900',
   },
   smallControlsRow: {
@@ -505,20 +415,6 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: spacing.xs,
     justifyContent: 'space-between',
-  },
-  subtitle: {
-    fontSize: 13,
-    fontWeight: '700',
-    lineHeight: 20,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: '900',
-    lineHeight: 26,
-  },
-  titleBlock: {
-    flex: 1,
-    gap: 2,
   },
   titleRow: {
     alignItems: 'flex-start',
@@ -534,13 +430,14 @@ const styles = StyleSheet.create({
   },
   transcriptPanel: {
     flex: 1,
-    gap: spacing.sm,
+    gap: spacing.xs,
     minHeight: 0,
+    paddingHorizontal: spacing.sm,
   },
   translationText: {
-    fontSize: 18,
-    fontWeight: '600',
-    lineHeight: 27,
+    fontSize: 20,
+    fontWeight: '700',
+    lineHeight: 29,
   },
   videoPlaceholder: {
     alignItems: 'center',

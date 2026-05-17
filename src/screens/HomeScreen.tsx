@@ -5,7 +5,6 @@ import {
   AppState,
   Dimensions,
   Image,
-  Linking,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -24,14 +23,12 @@ import { YouTubeVideoSlot } from '../components/YouTubeVideoSlot';
 import { defaultTargetLanguage, getLanguageLabel, languageOptions } from '../constants/languages';
 import { palette, spacing } from '../constants/theme';
 import {
-  buildWhatsAppShareUrl,
   fetchYouTubePreview,
   getYouTubeThumbnailUrl,
   parseYouTubeUrl,
   type YouTubePreview,
 } from '../lib/youtube';
 import {
-  formatShareText,
   getFriendlyFailureCopy,
   languagePresets,
 } from '../lib/reader';
@@ -82,16 +79,9 @@ export function HomeScreen({
   const [targetLanguage, setTargetLanguage] = useState<string>(defaultTargetLanguage.code);
   const [pickerVisible, setPickerVisible] = useState(false);
   const [historyQuery, setHistoryQuery] = useState('');
-  const [readerMode, setReaderMode] = useState<'transcript' | 'translation'>('translation');
-  const [playerMode, setPlayerMode] = useState<'bilingual' | 'original' | 'translation'>('bilingual');
-  const [playbackRate, setPlaybackRate] = useState(1);
   const [playerActiveMs, setPlayerActiveMs] = useState(0);
-  const [playerAutoScrollEnabled, setPlayerAutoScrollEnabled] = useState(true);
   const [playerDurationMs, setPlayerDurationMs] = useState(0);
-  const [playerIsPlaying, setPlayerIsPlaying] = useState(false);
   const [playerSeekRequestMs, setPlayerSeekRequestMs] = useState<number | null>(null);
-  const [textSize, setTextSize] = useState(24);
-  const [isFocused, setIsFocused] = useState(false);
   const [wasAutoPasted, setWasAutoPasted] = useState(false);
 
   const deferredUrl = useDeferredValue(url);
@@ -104,15 +94,6 @@ export function HomeScreen({
       onSelectEntry(entries[0]._id);
     }
   }, [entries, onSelectEntry, selectedEntryId]);
-
-  useEffect(() => {
-    if (!selectedEntry) return;
-    if (selectedEntry.translationStatus === 'ready') {
-      setReaderMode('translation');
-      return;
-    }
-    setReaderMode('transcript');
-  }, [selectedEntry]);
 
   useEffect(() => {
     const checkClipboard = async () => {
@@ -176,19 +157,6 @@ export function HomeScreen({
     );
   }, [entries, historyQuery]);
 
-  const currentReaderText =
-    readerMode === 'translation' && selectedEntry?.translationStatus === 'ready'
-      ? selectedEntry.translationText ?? selectedEntry.transcriptText ?? ''
-      : selectedEntry?.transcriptText ?? '';
-
-  const currentReaderLabel =
-    readerMode === 'translation' && selectedEntry?.translationStatus === 'ready'
-      ? `Translation • ${selectedEntry.targetLanguageLabel}`
-      : `Transcript • ${selectedEntry?.sourceLanguageLabel ?? 'Original'}`;
-
-  const isReaderReady = selectedEntry?.status === 'ready' && Boolean(selectedEntry.transcriptText);
-  const translationReady = selectedEntry?.translationStatus === 'ready';
-  const translationFailed = selectedEntry?.translationStatus === 'failed';
   const failureCopy = getFriendlyFailureCopy(selectedEntry?.errorMessage);
 
   const handleReadVideo = async (entryOverride?: Doc<'entries'> | null) => {
@@ -225,24 +193,6 @@ export function HomeScreen({
     await onToggleFavorite(entryId);
   };
 
-  const handleShare = async (content: string, viewLabel: string) => {
-    if (!content) {
-      Alert.alert('Still working', 'Please wait until the text is ready.');
-      return;
-    }
-    const title = selectedEntry?.title ?? 'Bolo video';
-    await Linking.openURL(buildWhatsAppShareUrl(formatShareText({ content, title, viewLabel })));
-  };
-
-  const handleCopy = async (content: string, label: string) => {
-    if (!content) {
-      Alert.alert('Still working', `Please wait until the ${label.toLowerCase()} is ready.`);
-      return;
-    }
-    await Clipboard.setStringAsync(content);
-    Alert.alert('Copied!', `${label} is ready to paste.`);
-  };
-
   const handlePlayerSeek = useCallback((timeMs: number) => {
     const durationMs = Math.max(playerDurationMs, syncedSegments.at(-1)?.endMs ?? 0);
     const nextTimeMs = Math.max(0, Math.min(timeMs, durationMs || timeMs));
@@ -251,55 +201,14 @@ export function HomeScreen({
     setPlayerSeekRequestMs(nextTimeMs);
   }, [playerDurationMs, syncedSegments]);
 
-  const handlePlayerSeekBy = useCallback((offsetMs: number) => {
-    handlePlayerSeek(playerActiveMs + offsetMs);
-  }, [handlePlayerSeek, playerActiveMs]);
-
-  const renderReaderModes = () => {
-    if (!selectedEntry) return null;
-    return (
-      <View style={styles.modeRow}>
-        <Pressable
-          onPress={() => setReaderMode('translation')}
-          style={[
-            styles.modeChip,
-            {
-              backgroundColor: readerMode === 'translation' ? colors.accent : colors.surface,
-              borderColor: readerMode === 'translation' ? colors.accent : colors.border,
-              opacity: translationReady ? 1 : 0.45,
-            },
-          ]}
-        >
-          <Text style={[styles.modeChipText, { color: readerMode === 'translation' ? colors.reader : colors.text }]}>
-            Translation
-          </Text>
-        </Pressable>
-        <Pressable
-          onPress={() => setReaderMode('transcript')}
-          style={[
-            styles.modeChip,
-            {
-              backgroundColor: readerMode === 'transcript' ? colors.accent : colors.surface,
-              borderColor: readerMode === 'transcript' ? colors.accent : colors.border,
-            },
-          ]}
-        >
-          <Text style={[styles.modeChipText, { color: readerMode === 'transcript' ? colors.reader : colors.text }]}>
-            Transcript
-          </Text>
-        </Pressable>
-      </View>
-    );
-  };
-
   const renderReadingView = () => {
     if (!selectedEntry) return null;
 
     const syncedReady = selectedEntry.processingVersion === 2 && syncedSegments.length > 0;
 
     return (
-      <SafeAreaView style={[styles.safeArea, { backgroundColor: isFocused ? colors.reader : colors.background }]}>
-        <View style={[styles.header, { borderBottomWidth: 3, borderColor: colors.border }]}>
+      <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
+        <View style={[styles.header, { borderBottomWidth: 1, borderColor: colors.border }]}>
           <Pressable
             onPress={() => {
               Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -312,16 +221,6 @@ export function HomeScreen({
           </Pressable>
 
           <View style={styles.readerHeaderTools}>
-            <Pressable
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                setIsFocused(!isFocused);
-              }}
-              style={[styles.headerIconBtn, { borderColor: colors.border, backgroundColor: isFocused ? colors.accent : colors.surface }]}
-            >
-              <MaterialCommunityIcons name={isFocused ? 'lamp' : 'lamp-outline'} size={24} color={isFocused ? colors.reader : colors.text} />
-            </Pressable>
-
             <Pressable
               onPress={() => handleToggleFavorite(selectedEntry._id)}
               style={[styles.headerIconBtn, { borderColor: colors.border }]}
@@ -338,197 +237,49 @@ export function HomeScreen({
         {syncedReady ? (
           <SyncedVideoPlayer
             activeMs={playerActiveMs}
-            autoScrollEnabled={playerAutoScrollEnabled}
             colors={colors}
             debugReport={syncedDebugReport}
-            durationMs={Math.max(
-              playerDurationMs,
-              selectedEntry.durationSec ? selectedEntry.durationSec * 1000 : 0,
-              syncedSegments.at(-1)?.endMs ?? 0,
-            )}
-            isPlaying={playerIsPlaying}
-            mode={playerMode}
-            onChangeMode={setPlayerMode}
             onSeek={handlePlayerSeek}
-            onSeekBy={handlePlayerSeekBy}
-            onToggleAutoScroll={() => setPlayerAutoScrollEnabled((current) => !current)}
-            onTogglePlaying={() => setPlayerIsPlaying((current) => !current)}
-            playbackRate={playbackRate}
             segments={syncedSegments}
-            setPlaybackRate={setPlaybackRate}
-            title={selectedEntry.title}
             videoSlot={
               <YouTubeVideoSlot
                 colors={colors}
-                isPlaying={playerIsPlaying}
                 onDurationChange={setPlayerDurationMs}
                 onError={(message) => Alert.alert('Video problem', message)}
-                onPlayingChange={setPlayerIsPlaying}
+                onPlayingChange={() => undefined}
                 onTimeChange={setPlayerActiveMs}
-                playbackRate={playbackRate}
                 seekRequestMs={playerSeekRequestMs}
                 videoId={selectedEntry.videoId}
               />
             }
           />
         ) : (
-        <View style={styles.readingContainer}>
-          <ScrollView contentContainerStyle={styles.readingContent} showsVerticalScrollIndicator={false}>
-            {!isFocused && (
-              <View style={styles.bookHero}>
-                <Text style={[styles.videoTitle, { color: colors.text }]}>{selectedEntry.title}</Text>
-                <Text style={[styles.previewAuthor, { color: colors.textSoft }]}>
-                  By {selectedEntry.channelTitle ?? 'YouTube'}
+          <View style={styles.processingState}>
+            {selectedEntry.status === 'failed' ? (
+              <>
+                <MaterialCommunityIcons name="alert-circle-outline" size={40} color={colors.danger} />
+                <Text style={[styles.statusTitle, { color: colors.danger }]}>{failureCopy.title}</Text>
+                <Text style={[styles.statusBody, { color: colors.textSoft }]}>
+                  {failureCopy.body}
                 </Text>
-
-                <View style={styles.metaRow}>
-                  {renderReaderModes()}
-                  <View style={styles.glassesControl}>
-                    <Pressable
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                        setTextSize((current) => Math.max(18, current - 2));
-                      }}
-                      style={[styles.glassBtn, { borderColor: colors.border }]}
-                    >
-                      <Text style={[styles.glassBtnText, { color: colors.text }]}>A-</Text>
-                    </Pressable>
-                    <Pressable
-                      onPress={() => {
-                        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                        setTextSize((current) => Math.min(48, current + 2));
-                      }}
-                      style={[styles.glassBtn, { borderColor: colors.border }]}
-                    >
-                      <Text style={[styles.glassBtnText, { color: colors.text }]}>A+</Text>
-                    </Pressable>
-                  </View>
-                </View>
-
-                {translationFailed && (
-                  <View style={[styles.noticeCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                    <MaterialCommunityIcons color={colors.info} name="information-outline" size={20} />
-                    <Text style={[styles.noticeText, { color: colors.text }]}>
-                      Showing original transcript (translation failed).
-                    </Text>
-                  </View>
-                )}
-              </View>
-            )}
-
-            <View
-              style={[
-                styles.textContainer,
-                {
-                  backgroundColor: colors.reader,
-                  borderColor: isFocused ? 'transparent' : colors.border,
-                  borderWidth: isFocused ? 0 : 3,
-                  marginTop: isFocused ? spacing.xl : 0,
-                },
-              ]}
-            >
-              {!isReaderReady ? (
-                <View style={styles.statusWrap}>
-                  {selectedEntry.status === 'failed' ? (
-                    <>
-                      <MaterialCommunityIcons name="alert-circle-outline" size={36} color={colors.danger} />
-                      <Text style={[styles.statusTitle, { color: colors.danger }]}>{failureCopy.title}</Text>
-                      <Pressable
-                        onPress={() => handleReadVideo(selectedEntry)}
-                        style={[styles.inlineActionButton, { backgroundColor: colors.accent, borderColor: colors.border, marginTop: 16 }]}
-                      >
-                        <MaterialCommunityIcons color="#fff" name="refresh" size={18} />
-                        <Text style={styles.inlineActionText}>Try Again</Text>
-                      </Pressable>
-                    </>
-                  ) : (
-                    <>
-                      <ActivityIndicator size="large" color={colors.accent} />
-                      <Text style={[styles.statusTitle, { color: colors.text }]}>Preparing text...</Text>
-                    </>
-                  )}
-                </View>
-              ) : (
-                <Text
-                  selectable
-                  style={[
-                    styles.transcriptText,
-                    { color: colors.text, fontSize: textSize, lineHeight: textSize * 1.55 },
-                  ]}
+                <Pressable
+                  onPress={() => handleReadVideo(selectedEntry)}
+                  style={[styles.inlineActionButton, { backgroundColor: colors.accent, borderColor: colors.border }]}
                 >
-                  {currentReaderText}
+                  <MaterialCommunityIcons color="#fff" name="refresh" size={18} />
+                  <Text style={styles.inlineActionText}>Try Again</Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                <ActivityIndicator size="large" color={colors.accent} />
+                <Text style={[styles.statusTitle, { color: colors.text }]}>Preparing synced player...</Text>
+                <Text style={[styles.statusBody, { color: colors.textSoft }]}>
+                  {selectedEntry.processingStage ?? 'We are preparing the video, transcript, and translation.'}
                 </Text>
-              )}
-            </View>
-
-            {!isFocused && (
-              <View style={styles.extrasSection}>
-                {selectedEntry.summaryText ? (
-                  <View style={[styles.extraCard, { backgroundColor: colors.surface, borderColor: colors.border }]}>
-                    <Text style={[styles.extraTitle, { color: colors.text }]}>Easy Summary</Text>
-                    <Text style={[styles.extraBody, { color: colors.text }]}>{selectedEntry.summaryText}</Text>
-                  </View>
-                ) : null}
-
-                {selectedEntry.chapters?.length ? (
-                  <View style={styles.chaptersBlock}>
-                    <Text style={[styles.blockTitle, { color: colors.text }]}>Chapters</Text>
-                    {selectedEntry.chapters.map((chapter, index) => (
-                      <View
-                        key={`${selectedEntry._id}-chapter-${index + 1}`}
-                        style={[styles.chapterCard, { backgroundColor: colors.surface, borderColor: colors.border }]}
-                      >
-                        <Text style={[styles.chapterTitle, { color: colors.text }]}>
-                          {index + 1}. {chapter.title}
-                        </Text>
-                        <Text style={[styles.chapterSummary, { color: colors.textSoft }]}>
-                          {chapter.summary}
-                        </Text>
-                      </View>
-                    ))}
-                  </View>
-                ) : null}
-              </View>
+              </>
             )}
-
-            <View style={styles.readerBottomPad} />
-          </ScrollView>
-
-          <View
-            style={[
-              styles.stickyToolbelt,
-              {
-                backgroundColor: isFocused ? colors.reader : colors.background,
-                borderTopWidth: 3,
-                borderColor: colors.border,
-              },
-            ]}
-          >
-            <View style={styles.toolbeltRow}>
-              <Pressable
-                onPress={() => {
-                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                  handleShare(currentReaderText, currentReaderLabel);
-                }}
-                style={[styles.toolButton, { backgroundColor: colors.info, borderColor: colors.border }]}
-              >
-                <MaterialCommunityIcons name="whatsapp" size={26} color="#FFF" />
-                <Text style={styles.toolButtonText}>Send to WhatsApp</Text>
-              </Pressable>
-            </View>
-
-            <Pressable
-              onPress={() => {
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-                handleCopy(currentReaderText, currentReaderLabel);
-              }}
-              style={[styles.secondaryToolButton, { borderColor: colors.border }]}
-            >
-              <MaterialCommunityIcons name="content-copy" size={20} color={colors.text} />
-              <Text style={[styles.secondaryToolButtonText, { color: colors.text }]}>Copy this text</Text>
-            </Pressable>
           </View>
-        </View>
         )}
       </SafeAreaView>
     );
@@ -781,6 +532,13 @@ const styles = StyleSheet.create({
   previewPlaceholderText: { fontSize: 16, fontWeight: '600' },
   previewThumb: { borderRadius: 8, height: 60, width: 80 },
   previewTitle: { fontSize: 16, fontWeight: '800' },
+  processingState: {
+    alignItems: 'center',
+    flex: 1,
+    gap: spacing.sm,
+    justifyContent: 'center',
+    padding: spacing.xl,
+  },
   readerBottomPad: { height: 220 },
   readerHeaderTools: { alignItems: 'center', flexDirection: 'row', gap: spacing.xs },
   readingContainer: { flex: 1 },
@@ -791,6 +549,7 @@ const styles = StyleSheet.create({
   secondaryToolButton: { alignItems: 'center', borderRadius: 16, borderWidth: 3, flexDirection: 'row', gap: 8, height: 60, justifyContent: 'center', paddingHorizontal: spacing.md },
   secondaryToolButtonText: { fontSize: 16, fontWeight: '800' },
   statusTitle: { fontSize: 24, fontWeight: '800', textAlign: 'center' },
+  statusBody: { fontSize: 16, fontWeight: '600', lineHeight: 24, textAlign: 'center' },
   statusWrap: { alignItems: 'center', flex: 1, gap: spacing.sm, justifyContent: 'center' },
   stepNumber: { alignItems: 'center', borderRadius: 8, height: 32, justifyContent: 'center', width: 32 },
   stepNumberText: { color: '#FFF', fontSize: 18, fontWeight: '900' },

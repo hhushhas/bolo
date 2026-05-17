@@ -13,24 +13,20 @@ export type YouTubeVideoSlotProps = {
     text: string;
     textSoft: string;
   };
-  isPlaying: boolean;
   onDurationChange: (durationMs: number) => void;
   onError: (message: string) => void;
   onPlayingChange: (playing: boolean) => void;
   onTimeChange: (timeMs: number) => void;
-  playbackRate: number;
   seekRequestMs: number | null;
   videoId: string;
 };
 
 export function YouTubeVideoSlot({
   colors,
-  isPlaying,
   onDurationChange,
   onError,
   onPlayingChange,
   onTimeChange,
-  playbackRate,
   seekRequestMs,
   videoId,
 }: YouTubeVideoSlotProps) {
@@ -39,8 +35,8 @@ export function YouTubeVideoSlot({
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const landscape = width > height;
-  const playerWidth = Math.max(260, landscape ? width * 0.48 : width - 64);
-  const playerHeight = Math.max(200, Math.round(playerWidth * 9 / 16));
+  const playerWidth = Math.round(landscape ? width * 0.54 : width);
+  const playerHeight = Math.round(playerWidth * 9 / 16);
 
   useEffect(() => {
     if (!ready || seekRequestMs === null) {
@@ -51,7 +47,7 @@ export function YouTubeVideoSlot({
   }, [ready, seekRequestMs]);
 
   useEffect(() => {
-    if (!ready || !isPlaying) {
+    if (!ready) {
       return;
     }
 
@@ -62,14 +58,14 @@ export function YouTubeVideoSlot({
     }, 500);
 
     return () => clearInterval(interval);
-  }, [isPlaying, onTimeChange, ready]);
+  }, [onTimeChange, ready]);
 
   return (
     <View style={styles.container}>
       <YoutubePlayer
         height={playerHeight}
         initialPlayerParams={{
-          controls: false,
+          controls: true,
           preventFullScreen: true,
           rel: false,
         }}
@@ -92,8 +88,6 @@ export function YouTubeVideoSlot({
             onDurationChange(Math.round(seconds * 1000));
           });
         }}
-        play={isPlaying}
-        playbackRate={playbackRate}
         ref={playerRef}
         videoId={videoId}
         webViewStyle={[styles.webView, { backgroundColor: colors.backgroundAccent }]}
@@ -121,14 +115,12 @@ export function YouTubeVideoSlot({
 const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
-    borderRadius: 12,
     overflow: 'hidden',
     position: 'relative',
     width: '100%',
   },
   statusOverlay: {
     alignItems: 'center',
-    borderRadius: 12,
     borderWidth: 2,
     bottom: 0,
     justifyContent: 'center',
