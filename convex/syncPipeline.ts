@@ -70,10 +70,11 @@ const createJobId = () =>
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 const DEFAULT_FETCH_TIMEOUT_MS = 120_000;
-const MEDIA_PREP_TIMEOUT_MS = 8.5 * 60_000;
+const MEDIA_PREP_TIMEOUT_MS = 6.5 * 60_000;
 const WHISPER_TIMEOUT_MS = 6 * 60_000;
 const TRANSLATION_TIMEOUT_MS = 90_000;
 const TRANSLATION_MAX_OUTPUT_TOKENS = 2_500;
+const MEDIA_PREP_CHUNK_SECONDS = 60;
 
 const requireEnv = (name: keyof typeof envByName) => {
   const value = envByName[name]();
@@ -158,6 +159,7 @@ const fetchJson = async <T>(
 
 export const prepareMedia = internalAction({
   args: {
+    attemptId: v.optional(v.string()),
     entryId: v.id('entries'),
     youtubeUrl: v.string(),
   },
@@ -175,6 +177,7 @@ export const prepareMedia = internalAction({
     const startedAt = Date.now();
 
     await ctx.runMutation(internal.entries.updateProgress, {
+      attemptId: args.attemptId,
       entryId: args.entryId,
       processingStage: 'Downloading and preparing audio',
       updatedAt: Date.now(),
@@ -200,6 +203,7 @@ export const prepareMedia = internalAction({
     try {
       result = await fetchJson(`${mediaPrepUrl.replace(/\/$/, '')}/prepare`, {
         body: JSON.stringify({
+          chunkSeconds: MEDIA_PREP_CHUNK_SECONDS,
           entryId: args.entryId,
           jobId: createJobId(),
           youtubeUrl: args.youtubeUrl,
@@ -233,6 +237,7 @@ export const prepareMedia = internalAction({
     const now = Date.now();
 
     await ctx.runMutation(internal.entries.replaceMediaChunks, {
+      attemptId: args.attemptId,
       chunks: result.chunks,
       createdAt: now,
       entryId: args.entryId,
@@ -261,6 +266,7 @@ export const prepareMedia = internalAction({
 
 export const cleanupMediaChunks = internalAction({
   args: {
+    attemptId: v.optional(v.string()),
     entryId: v.id('entries'),
     r2Keys: v.array(v.string()),
   },
@@ -293,6 +299,7 @@ export const cleanupMediaChunks = internalAction({
       const elapsedSec = (Date.now() - startedAt) / 1000;
 
       await ctx.runMutation(internal.entries.markMediaChunksDeleted, {
+        attemptId: args.attemptId,
         entryId: args.entryId,
         r2Keys: args.r2Keys,
         updatedAt: Date.now(),
@@ -333,6 +340,7 @@ export const cleanupMediaChunks = internalAction({
 
 export const transcribeChunk = internalAction({
   args: {
+    attemptId: v.optional(v.string()),
     chunkDurationMs: v.number(),
     chunkIndex: v.number(),
     chunkStartMs: v.number(),
@@ -424,6 +432,7 @@ export const transcribeChunk = internalAction({
 
 export const translateSegmentBatch = internalAction({
   args: {
+    attemptId: v.optional(v.string()),
     entryId: v.id('entries'),
     segments: v.array(displaySegmentValidator),
     sourceLanguageLabel: v.string(),

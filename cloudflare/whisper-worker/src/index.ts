@@ -6,6 +6,12 @@ type WhisperWorkerEnv = {
   MEDIA_BUCKET: {
     delete: (keys: string | string[]) => Promise<void>;
     get: (key: string) => Promise<R2ObjectBody | null>;
+    list: (options: { prefix: string }) => Promise<{
+      objects: {
+        key: string;
+        size: number;
+      }[];
+    }>;
   };
   WHISPER_MODEL?: string;
   WHISPER_UNIT_PRICE_USD?: string;
@@ -29,6 +35,10 @@ type TranscribeChunkRequest = {
 type CleanupChunksRequest = {
   entryId: string;
   r2Keys: string[];
+};
+
+type ListMediaRequest = {
+  prefix: string;
 };
 
 type WhisperSegment = {
@@ -116,6 +126,18 @@ const parseCleanupRequest = async (request: Request) => {
   } satisfies CleanupChunksRequest;
 };
 
+const parseListMediaRequest = async (request: Request) => {
+  const body = (await request.json()) as Partial<ListMediaRequest>;
+
+  if (typeof body.prefix !== 'string' || !body.prefix || body.prefix.includes('..')) {
+    throw new Error('Invalid media prefix.');
+  }
+
+  return {
+    prefix: body.prefix,
+  } satisfies ListMediaRequest;
+};
+
 const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
   const bytes = new Uint8Array(buffer);
   const chunkSize = 0x8000;
@@ -190,6 +212,25 @@ const handler = {
       } catch (error) {
         return jsonResponse(
           { error: error instanceof Error ? error.message : 'Cleanup failed.' },
+          { status: 400 },
+        );
+      }
+    }
+
+    if (pathname === '/list-media') {
+      try {
+        const payload = await parseListMediaRequest(request);
+        const result = await env.MEDIA_BUCKET.list({ prefix: payload.prefix });
+
+        return jsonResponse({
+          objects: result.objects.map((object) => ({
+            key: object.key,
+            size: object.size,
+          })),
+        });
+      } catch (error) {
+        return jsonResponse(
+          { error: error instanceof Error ? error.message : 'Media listing failed.' },
           { status: 400 },
         );
       }

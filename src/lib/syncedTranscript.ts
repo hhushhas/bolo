@@ -305,59 +305,23 @@ export const buildSegmentTranslationPrompt = ({
 }) =>
   [
     `Translate these timed transcript segments from ${sourceLanguageLabel} to ${targetLanguageLabel}.`,
-    'Return strict JSON with exactly this shape:',
-    '{"segments":[{"id":"0","translatedText":"..."}]}',
+    'Return only one line per segment in this exact format:',
+    'id|||translated text',
+    'Do not return JSON, bullets, markdown, code fences, or commentary.',
     'Preserve every id exactly. Do not merge, split, reorder, skip, or add segments.',
+    'Replace any internal line breaks in translations with spaces.',
     'Keep each translation natural for reading alongside video playback.',
     '',
     JSON.stringify({ segments: items }),
   ].join('\n');
 
-export const parseSegmentTranslations = ({
+const validateSegmentTranslations = ({
   expectedIds,
-  text,
+  translations,
 }: {
   expectedIds: string[];
-  text: string;
-}): SegmentTranslation[] => {
-  const firstBrace = text.indexOf('{');
-  const lastBrace = text.lastIndexOf('}');
-
-  if (firstBrace === -1 || lastBrace <= firstBrace) {
-    throw new Error('Translation response did not contain JSON.');
-  }
-
-  const parsed = JSON.parse(text.slice(firstBrace, lastBrace + 1)) as {
-    segments?: unknown;
-  };
-
-  if (!Array.isArray(parsed.segments)) {
-    throw new Error('Translation response did not include a segments array.');
-  }
-
-  const translations = parsed.segments.map((segment) => {
-    if (
-      !segment ||
-      typeof segment !== 'object' ||
-      !('id' in segment) ||
-      !('translatedText' in segment)
-    ) {
-      throw new Error('Translation response included a malformed segment.');
-    }
-
-    const id = String(segment.id);
-    const translatedText = normalizeWhitespace(String(segment.translatedText));
-
-    if (!translatedText) {
-      throw new Error(`Translation response included an empty translation for segment ${id}.`);
-    }
-
-    return {
-      id,
-      translatedText,
-    };
-  });
-
+  translations: SegmentTranslation[];
+}) => {
   const expected = new Set(expectedIds);
   const seen = new Set<string>();
 
@@ -380,6 +344,94 @@ export const parseSegmentTranslations = ({
   }
 
   return translations;
+};
+
+const parseLineSegmentTranslations = (text: string) => {
+  const translations: SegmentTranslation[] = [];
+
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+
+    if (!line || line === '```') {
+      continue;
+    }
+
+    const separatorIndex = line.indexOf('|||');
+
+    if (separatorIndex === -1) {
+      continue;
+    }
+
+    const id = line.slice(0, separatorIndex).trim();
+    const translatedText = normalizeWhitespace(line.slice(separatorIndex + 3));
+
+    if (!id || !translatedText) {
+      throw new Error('Translation response included a malformed segment.');
+    }
+
+    translations.push({ id, translatedText });
+  }
+
+  return translations;
+};
+
+const parseJsonSegmentTranslations = (text: string) => {
+  const firstBrace = text.indexOf('{');
+  const lastBrace = text.lastIndexOf('}');
+
+  if (firstBrace === -1 || lastBrace <= firstBrace) {
+    throw new Error('Translation response did not contain JSON.');
+  }
+
+  const parsed = JSON.parse(text.slice(firstBrace, lastBrace + 1)) as {
+    segments?: unknown;
+  };
+
+  if (!Array.isArray(parsed.segments)) {
+    throw new Error('Translation response did not include a segments array.');
+  }
+
+  return parsed.segments.map((segment) => {
+    if (
+      !segment ||
+      typeof segment !== 'object' ||
+      !('id' in segment) ||
+      !('translatedText' in segment)
+    ) {
+      throw new Error('Translation response included a malformed segment.');
+    }
+
+    const id = String(segment.id);
+    const translatedText = normalizeWhitespace(String(segment.translatedText));
+
+    if (!translatedText) {
+      throw new Error(`Translation response included an empty translation for segment ${id}.`);
+    }
+
+    return {
+      id,
+      translatedText,
+    };
+  });
+};
+
+export const parseSegmentTranslations = ({
+  expectedIds,
+  text,
+}: {
+  expectedIds: string[];
+  text: string;
+}): SegmentTranslation[] => {
+  const lineTranslations = parseLineSegmentTranslations(text);
+
+  if (lineTranslations.length > 0) {
+    return validateSegmentTranslations({ expectedIds, translations: lineTranslations });
+  }
+
+  return validateSegmentTranslations({
+    expectedIds,
+    translations: parseJsonSegmentTranslations(text),
+  });
 };
 
 export const applySegmentTranslations = ({

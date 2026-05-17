@@ -161,18 +161,32 @@ describe('translation helpers', () => {
     ]);
   });
 
-  it('builds a strict JSON translation prompt', () => {
+  it('builds a line-based translation prompt', () => {
     const prompt = buildSegmentTranslationPrompt({
       items: [{ id: '0', originalText: 'Hello world.' }],
       sourceLanguageLabel: 'English',
       targetLanguageLabel: 'Urdu',
     });
 
+    expect(prompt).toContain('id|||translated text');
+    expect(prompt).toContain('Do not return JSON');
     expect(prompt).toContain('Preserve every id exactly');
     expect(prompt).toContain('"id":"0"');
   });
 
-  it('parses and applies segment translations', () => {
+  it('parses and applies line-based segment translations', () => {
+    const translations = parseSegmentTranslations({
+      expectedIds: ['0', '1'],
+      text: ['0|||Salam duniya.', '1|||Yeh aligned rehta hai.'].join('\n'),
+    });
+
+    expect(applySegmentTranslations({ segments, translations })).toMatchObject([
+      { index: 0, translatedText: 'Salam duniya.' },
+      { index: 1, translatedText: 'Yeh aligned rehta hai.' },
+    ]);
+  });
+
+  it('keeps JSON parsing as a compatibility fallback', () => {
     const translations = parseSegmentTranslations({
       expectedIds: ['0', '1'],
       text: '{"segments":[{"id":"0","translatedText":"Salam duniya."},{"id":"1","translatedText":"Yeh aligned rehta hai."}]}',

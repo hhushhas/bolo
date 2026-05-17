@@ -108,7 +108,7 @@ def download_audio(workdir: Path, youtube_url: str) -> Path:
         "--print",
         "after_move:filepath",
         "-f",
-        "bestaudio/best",
+        "worstaudio[abr<=64]/worstaudio/bestaudio/best",
         "-o",
         output_template,
     ]
@@ -150,8 +150,8 @@ def chunk_audio(source_path: Path, chunks_dir: Path, chunk_seconds: int) -> list
             "1",
             "-ar",
             "16000",
-            "-af",
-            "loudnorm=I=-18:LRA=11:TP=-1.5",
+            "-b:a",
+            "32k",
             "-f",
             "segment",
             "-segment_time",
@@ -204,9 +204,12 @@ def prepare_media(payload: dict[str, Any]) -> dict[str, Any]:
       entry_prefix = Path("jobs") / entry_id / job_id / "chunks"
       chunks = []
       start_ms = 0
+      total_duration_ms = round(duration_sec * 1000)
+      nominal_chunk_ms = chunk_seconds * 1000
 
       for index, chunk_path in enumerate(chunk_paths):
-          duration_ms = round(ffprobe_duration(chunk_path) * 1000)
+          remaining_ms = max(total_duration_ms - start_ms, 0)
+          duration_ms = min(nominal_chunk_ms, remaining_ms) if remaining_ms else nominal_chunk_ms
           r2_key = str(entry_prefix / f"{index:05d}.mp3")
           upload_chunk(chunk_path, r2_key, entry_prefix)
 

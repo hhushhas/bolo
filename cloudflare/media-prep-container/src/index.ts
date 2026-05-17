@@ -18,7 +18,7 @@ export class MediaPrepContainer extends Container {
   defaultPort = 8080;
   requiredPorts = [8080];
   pingEndpoint = 'container/health';
-  sleepAfter = '30s';
+  sleepAfter = '5s';
   enableInternet = true;
   envVars = (() => {
     const env = (this as unknown as { env: MediaPrepEnv }).env;
@@ -106,19 +106,31 @@ export default {
     const jobId = typeof payload?.jobId === 'string' && payload.jobId ? payload.jobId : crypto.randomUUID();
     const container = getContainer(env.MEDIA_PREP as never, jobId);
 
-    await container.startAndWaitForPorts(8080);
+    try {
+      await container.startAndWaitForPorts(8080);
 
-    return container.containerFetch(
-      'http://container/prepare',
-      {
-        body: JSON.stringify(payload),
-        headers: {
-          authorization: request.headers.get('authorization') ?? '',
-          'content-type': 'application/json',
+      return await container.containerFetch(
+        'http://container/prepare',
+        {
+          body: JSON.stringify(payload),
+          headers: {
+            authorization: request.headers.get('authorization') ?? '',
+            'content-type': 'application/json',
+          },
+          method: 'POST',
         },
-        method: 'POST',
-      },
-      8080,
-    );
+        8080,
+      );
+    } catch (error) {
+      console.error('media prep wrapper failed', error);
+
+      return jsonResponse(
+        {
+          details: error instanceof Error ? error.stack : String(error),
+          error: 'Media prep container wrapper failed.',
+        },
+        { status: 502 },
+      );
+    }
   },
 };
