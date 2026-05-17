@@ -1,0 +1,7 @@
+name = "bolo-legal-site"
+main = "src/index.ts"
+compatibility_date = "2026-05-17"
+
+routes = [
+  { pattern = "bolo.q9labs.ai", custom_domain = true },
+]
