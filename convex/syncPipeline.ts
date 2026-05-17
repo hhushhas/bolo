@@ -69,6 +69,10 @@ const createJobId = () =>
     ? crypto.randomUUID()
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
+const DEFAULT_FETCH_TIMEOUT_MS = 120_000;
+const MEDIA_PREP_TIMEOUT_MS = 20 * 60_000;
+const WHISPER_TIMEOUT_MS = 6 * 60_000;
+
 const requireEnv = (name: keyof typeof envByName) => {
   const value = envByName[name]();
 
@@ -79,8 +83,45 @@ const requireEnv = (name: keyof typeof envByName) => {
   return value;
 };
 
-const fetchJson = async <T>(url: string, init: RequestInit) => {
-  const response = await fetch(url, init);
+const formatDuration = (durationMs: number) => `${Math.round(durationMs / 1000)}s`;
+
+const getErrorMessage = (error: unknown) =>
+  error instanceof Error ? error.message : String(error);
+
+const fetchJson = async <T>(
+  url: string,
+  init: RequestInit,
+  options: {
+    serviceName: string;
+    timeoutMs?: number;
+  },
+) => {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  let response: Response;
+
+  try {
+    response = await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    });
+  } catch (error) {
+    const reason = getErrorMessage(error);
+
+    if (controller.signal.aborted) {
+      throw new Error(
+        `${options.serviceName} timed out after ${formatDuration(timeoutMs)}. This is a backend processing issue; please retry.`,
+      );
+    }
+
+    throw new Error(
+      `${options.serviceName} is unreachable from Convex (${reason}). This is a backend processing issue; please retry.`,
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+
   const text = await response.text();
   let parsed: (T & { details?: string; error?: string }) | null = null;
 
@@ -89,23 +130,25 @@ const fetchJson = async <T>(url: string, init: RequestInit) => {
       parsed = JSON.parse(text) as T & { details?: string; error?: string };
     } catch {
       if (!response.ok) {
-        throw new Error(text.slice(0, 500));
+        throw new Error(`${options.serviceName} returned status ${response.status}: ${text.slice(0, 500)}`);
       }
 
-      throw new Error(`Request returned non-JSON response: ${text.slice(0, 500)}`);
+      throw new Error(`${options.serviceName} returned non-JSON response: ${text.slice(0, 500)}`);
     }
   }
 
   if (!response.ok) {
     throw new Error(
       parsed?.details
-        ? `${parsed.error}: ${parsed.details}`
-        : parsed?.error ?? `Request failed with status ${response.status}.`,
+        ? `${options.serviceName} failed with status ${response.status}: ${parsed.error}: ${parsed.details}`
+        : `${options.serviceName} failed with status ${response.status}: ${
+            parsed?.error ?? 'Request failed.'
+          }`,
     );
   }
 
   if (!parsed) {
-    throw new Error('Request returned an empty response.');
+    throw new Error(`${options.serviceName} returned an empty response.`);
   }
 
   return parsed;
@@ -127,6 +170,7 @@ export const prepareMedia = internalAction({
   handler: async (ctx, args) => {
     const mediaPrepUrl = requireEnv('BOLO_MEDIA_PREP_URL');
     const secret = requireEnv('BOLO_CONTAINER_SECRET');
+    const startedAt = Date.now();
 
     await ctx.runMutation(internal.entries.updateProgress, {
       entryId: args.entryId,
@@ -134,7 +178,7 @@ export const prepareMedia = internalAction({
       updatedAt: Date.now(),
     });
 
-    const result = await fetchJson<{
+    let result: {
       chunkSeconds: number;
       chunks: {
         durationMs: number;
@@ -149,18 +193,40 @@ export const prepareMedia = internalAction({
       durationSec: number;
       ffmpegSec: number;
       totalSec: number;
-    }>(`${mediaPrepUrl.replace(/\/$/, '')}/prepare`, {
-      body: JSON.stringify({
+    };
+
+    try {
+      result = await fetchJson(`${mediaPrepUrl.replace(/\/$/, '')}/prepare`, {
+        body: JSON.stringify({
+          entryId: args.entryId,
+          jobId: createJobId(),
+          youtubeUrl: args.youtubeUrl,
+        }),
+        headers: {
+          authorization: `Bearer ${secret}`,
+          'content-type': 'application/json',
+        },
+        method: 'POST',
+      }, {
+        serviceName: 'Cloudflare media prep',
+        timeoutMs: MEDIA_PREP_TIMEOUT_MS,
+      });
+    } catch (error) {
+      await ctx.runMutation(internal.entries.recordUsageEvent, {
+        createdAt: Date.now(),
         entryId: args.entryId,
-        jobId: createJobId(),
-        youtubeUrl: args.youtubeUrl,
-      }),
-      headers: {
-        authorization: `Bearer ${secret}`,
-        'content-type': 'application/json',
-      },
-      method: 'POST',
-    });
+        event: {
+          metadata: getErrorMessage(error),
+          provider: 'cloudflare',
+          quantity: (Date.now() - startedAt) / 1000,
+          stage: 'media_prep',
+          status: 'failed',
+          unitType: 'runtime_second',
+        },
+      });
+
+      throw error;
+    }
 
     const now = Date.now();
 
@@ -218,6 +284,9 @@ export const cleanupMediaChunks = internalAction({
           'content-type': 'application/json',
         },
         method: 'POST',
+      }, {
+        serviceName: 'Cloudflare cleanup worker',
+        timeoutMs: DEFAULT_FETCH_TIMEOUT_MS,
       });
       const elapsedSec = (Date.now() - startedAt) / 1000;
 
@@ -314,6 +383,9 @@ export const transcribeChunk = internalAction({
         'content-type': 'application/json',
       },
       method: 'POST',
+    }, {
+      serviceName: 'Cloudflare Whisper worker',
+      timeoutMs: WHISPER_TIMEOUT_MS,
     });
     const elapsedSec = (Date.now() - startedAt) / 1000;
 

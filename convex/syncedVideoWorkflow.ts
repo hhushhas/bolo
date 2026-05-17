@@ -54,7 +54,7 @@ export const processSyncedVideo = workflow
           entryId: args.entryId,
           youtubeUrl: entry.youtubeUrl,
         },
-        { retry: { base: 2, initialBackoffMs: 5_000, maxAttempts: 2 } },
+        { retry: { base: 2, initialBackoffMs: 10_000, maxAttempts: 4 } },
       );
 
       await step.runMutation(internal.entries.updateProgress, {
