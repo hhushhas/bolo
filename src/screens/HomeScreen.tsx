@@ -208,7 +208,7 @@ export function HomeScreen({
 
     if (syncedReady) {
       return (
-        <SafeAreaView edges={[]} style={[styles.safeArea, { backgroundColor: colors.background }]}>
+        <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
           <SyncedVideoPlayer
             activeMs={playerActiveMs}
             colors={colors}
@@ -221,16 +221,16 @@ export function HomeScreen({
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
                   setView('input');
                 }}
-                style={[styles.floatingBackButton, { borderColor: colors.border, backgroundColor: colors.background }]}
+                style={[styles.compactBackButton, { borderColor: colors.border, backgroundColor: colors.background }]}
               >
-                <MaterialCommunityIcons name="chevron-left" size={26} color={colors.text} />
-                <Text style={[styles.floatingBackText, { color: colors.text }]}>Back</Text>
+                <MaterialCommunityIcons name="chevron-left" size={24} color={colors.text} />
+                <Text style={[styles.compactBackText, { color: colors.text }]}>Back</Text>
               </Pressable>
             }
             topRightControls={
               <Pressable
                 onPress={() => handleToggleFavorite(selectedEntry._id)}
-                style={[styles.floatingIconButton, { borderColor: colors.border, backgroundColor: colors.background }]}
+                style={[styles.compactIconButton, { borderColor: colors.border, backgroundColor: colors.background }]}
               >
                 <MaterialCommunityIcons
                   color={selectedEntry.favorite ? colors.accent : colors.textSoft}
@@ -517,23 +517,23 @@ const styles = StyleSheet.create({
   extraTitle: { fontSize: 22, fontWeight: '800' },
   extrasSection: { gap: spacing.lg, marginTop: spacing.xl },
   footer: { alignItems: 'center', marginTop: spacing.xl },
-  floatingBackButton: {
+  compactBackButton: {
     alignItems: 'center',
-    borderRadius: 14,
-    borderWidth: 2,
+    borderRadius: 10,
+    borderWidth: 1,
     flexDirection: 'row',
-    height: 44,
-    paddingLeft: 6,
-    paddingRight: 12,
+    height: 38,
+    paddingLeft: 4,
+    paddingRight: 10,
   },
-  floatingBackText: { fontSize: 17, fontWeight: '900' },
-  floatingIconButton: {
+  compactBackText: { fontSize: 15, fontWeight: '900' },
+  compactIconButton: {
     alignItems: 'center',
-    borderRadius: 14,
-    borderWidth: 2,
-    height: 44,
+    borderRadius: 10,
+    borderWidth: 1,
+    height: 38,
     justifyContent: 'center',
-    width: 44,
+    width: 38,
   },
   glassBtn: { alignItems: 'center', borderRadius: 999, borderWidth: 2, height: 42, justifyContent: 'center', width: 42 },
   glassBtnText: { fontSize: 16, fontWeight: '800' },

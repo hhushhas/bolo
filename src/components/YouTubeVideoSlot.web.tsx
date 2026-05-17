@@ -10,7 +10,7 @@ export function YouTubeVideoSlot({
 }: YouTubeVideoSlotProps) {
   const { height, width } = useWindowDimensions();
   const landscape = width > height;
-  const landscapeLeftPaneWidth = width / 1.62;
+  const landscapeLeftPaneWidth = width * (1.3 / 2.3);
   const playerWidth = Math.round(
     landscape ? Math.min(landscapeLeftPaneWidth, height * 16 / 9) : width,
   );

@@ -118,6 +118,23 @@ export function SyncedVideoPlayer({
     </View>
   );
 
+  const controlRow = (
+    <View style={styles.controlRow}>
+      <View>{topLeftControls}</View>
+      <View style={styles.controlRowRight}>
+        {topRightControls}
+        {debugReport ? (
+          <Pressable
+            onPress={() => setDebugVisible(true)}
+            style={[styles.controlIconButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
+          >
+            <MaterialCommunityIcons name="information-outline" size={20} color={colors.text} />
+          </Pressable>
+        ) : null}
+      </View>
+    </View>
+  );
+
   return (
     <View
       style={[
@@ -126,26 +143,17 @@ export function SyncedVideoPlayer({
         { backgroundColor: colors.background },
       ]}
     >
-      {topLeftControls ? <View style={styles.topLeftControls}>{topLeftControls}</View> : null}
-      <View style={styles.topRightControls}>
-        {topRightControls}
-        {debugReport ? (
-          <Pressable
-            onPress={() => setDebugVisible(true)}
-            style={[styles.floatingIconButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
-          >
-            <MaterialCommunityIcons name="information-outline" size={22} color={colors.text} />
-          </Pressable>
-        ) : null}
-      </View>
-
       {landscape ? (
         <>
           <View style={styles.landscapePlayer}>{player}</View>
-          <View style={styles.landscapeTranscript}>{transcript}</View>
+          <View style={styles.landscapeTranscript}>
+            {controlRow}
+            {transcript}
+          </View>
         </>
       ) : (
         <>
+          {controlRow}
           {player}
           {transcript}
         </>
@@ -189,6 +197,26 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  controlIconButton: {
+    alignItems: 'center',
+    borderRadius: 10,
+    borderWidth: 1,
+    height: 38,
+    justifyContent: 'center',
+    width: 38,
+  },
+  controlRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    minHeight: 44,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 3,
+  },
+  controlRowRight: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+  },
   copyButton: {
     alignItems: 'center',
     borderRadius: 16,
@@ -223,23 +251,15 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '900',
   },
-  floatingIconButton: {
-    alignItems: 'center',
-    borderRadius: 14,
-    borderWidth: 2,
-    height: 44,
-    justifyContent: 'center',
-    width: 44,
-  },
   landscapeContainer: {
     flexDirection: 'row',
   },
   landscapePlayer: {
-    flex: 1,
+    flex: 1.3,
     minWidth: 0,
   },
   landscapeTranscript: {
-    flex: 0.62,
+    flex: 1,
     minWidth: 0,
   },
   modalBackdrop: {
@@ -262,7 +282,7 @@ const styles = StyleSheet.create({
     borderWidth: 0,
     gap: 2,
     paddingHorizontal: spacing.sm,
-    paddingVertical: 8,
+    paddingVertical: 6,
   },
   segmentList: {
     gap: 2,
@@ -273,24 +293,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '900',
   },
-  smallControlsRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.xs,
-    justifyContent: 'space-between',
-  },
   titleRow: {
     alignItems: 'flex-start',
     flexDirection: 'row',
     gap: spacing.sm,
     justifyContent: 'space-between',
-  },
-  toolbarRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.xs,
   },
   transcriptPanel: {
     flex: 1,
@@ -298,23 +305,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
   },
   translationText: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
-    lineHeight: 25,
-  },
-  topLeftControls: {
-    left: spacing.sm,
-    position: 'absolute',
-    top: spacing.sm,
-    zIndex: 4,
-  },
-  topRightControls: {
-    flexDirection: 'row',
-    gap: spacing.xs,
-    position: 'absolute',
-    right: spacing.sm,
-    top: spacing.sm,
-    zIndex: 4,
+    lineHeight: 23,
   },
   videoPlaceholder: {
     alignItems: 'center',
