@@ -1,4 +1,5 @@
 import { v } from 'convex/values';
+import { Effect } from 'effect';
 import { internal } from './_generated/api';
 import { workflow } from './workflow';
 import {
@@ -13,6 +14,10 @@ const translatedBatchToSegments = (
     segments: DisplayTranscriptSegment[];
   }[],
 ) => batches.flatMap((batch) => batch.segments).sort((left, right) => left.index - right.index);
+
+const WHISPER_CONCURRENCY = 8;
+const TRANSLATION_BATCH_MAX_CHARS = 2200;
+const TRANSLATION_CONCURRENCY = 4;
 
 export const processSyncedVideo = workflow
   .define({
@@ -63,20 +68,25 @@ export const processSyncedVideo = workflow
         updatedAt: Date.now(),
       });
 
-      const transcriptChunks = await Promise.all(
-        prepared.chunks.map((chunk) =>
-          step.runAction(
-            internal.syncPipeline.transcribeChunk,
-            {
-              chunkDurationMs: chunk.durationMs,
-              chunkIndex: chunk.index,
-              chunkStartMs: chunk.startMs,
-              entryId: args.entryId,
-              language: entry.sourceLanguage !== 'auto' ? entry.sourceLanguage : undefined,
-              r2Key: chunk.r2Key,
-            },
-            { retry: { base: 2, initialBackoffMs: 5_000, maxAttempts: 3 } },
+      const transcriptChunks = await Effect.runPromise(
+        Effect.all(
+          prepared.chunks.map((chunk) =>
+            Effect.tryPromise(() =>
+              step.runAction(
+                internal.syncPipeline.transcribeChunk,
+                {
+                  chunkDurationMs: chunk.durationMs,
+                  chunkIndex: chunk.index,
+                  chunkStartMs: chunk.startMs,
+                  entryId: args.entryId,
+                  language: entry.sourceLanguage !== 'auto' ? entry.sourceLanguage : undefined,
+                  r2Key: chunk.r2Key,
+                },
+                { retry: { base: 2, initialBackoffMs: 5_000, maxAttempts: 3 } },
+              ),
+            ),
           ),
+          { concurrency: WHISPER_CONCURRENCY },
         ),
       );
 
@@ -100,22 +110,31 @@ export const processSyncedVideo = workflow
         updatedAt: Date.now(),
       });
 
-      const translatedBatches = await Promise.all(
-        buildTranslationBatches({ segments: mergedSegments }).map((batch) => {
-          const indexes = new Set(batch.map((item) => Number(item.id)));
-          const batchSegments = mergedSegments.filter((segment) => indexes.has(segment.index));
+      const translationBatches = buildTranslationBatches({
+        maxChars: TRANSLATION_BATCH_MAX_CHARS,
+        segments: mergedSegments,
+      });
+      const translatedBatches = await Effect.runPromise(
+        Effect.all(
+          translationBatches.map((batch) =>
+            Effect.tryPromise(() => {
+              const indexes = new Set(batch.map((item) => Number(item.id)));
+              const batchSegments = mergedSegments.filter((segment) => indexes.has(segment.index));
 
-          return step.runAction(
-            internal.syncPipeline.translateSegmentBatch,
-            {
-              entryId: args.entryId,
-              segments: batchSegments,
-              sourceLanguageLabel: entry.sourceLanguageLabel,
-              targetLanguageLabel: entry.targetLanguageLabel,
-            },
-            { retry: { base: 2, initialBackoffMs: 3_000, maxAttempts: 3 } },
-          );
-        }),
+              return step.runAction(
+                internal.syncPipeline.translateSegmentBatch,
+                {
+                  entryId: args.entryId,
+                  segments: batchSegments,
+                  sourceLanguageLabel: entry.sourceLanguageLabel,
+                  targetLanguageLabel: entry.targetLanguageLabel,
+                },
+                { retry: { base: 2, initialBackoffMs: 3_000, maxAttempts: 3 } },
+              );
+            }),
+          ),
+          { concurrency: TRANSLATION_CONCURRENCY },
+        ),
       );
       const translatedSegments = translatedBatchToSegments(translatedBatches);
       const now = Date.now();

@@ -72,6 +72,8 @@ const createJobId = () =>
 const DEFAULT_FETCH_TIMEOUT_MS = 120_000;
 const MEDIA_PREP_TIMEOUT_MS = 8.5 * 60_000;
 const WHISPER_TIMEOUT_MS = 6 * 60_000;
+const TRANSLATION_TIMEOUT_MS = 90_000;
+const TRANSLATION_MAX_OUTPUT_TOKENS = 2_500;
 
 const requireEnv = (name: keyof typeof envByName) => {
   const value = envByName[name]();
@@ -440,56 +442,80 @@ export const translateSegmentBatch = internalAction({
       id: String(segment.index),
       originalText: segment.originalText,
     }));
-    const { providerMetadata, text, usage } = await generateText({
-      model: provider(model, {
-        usage: {
-          include: true,
+
+    try {
+      const { providerMetadata, text, usage } = await generateText({
+        maxOutputTokens: TRANSLATION_MAX_OUTPUT_TOKENS,
+        model: provider(model, {
+          usage: {
+            include: true,
+          },
+        }),
+        prompt: buildSegmentTranslationPrompt({
+          items,
+          sourceLanguageLabel: args.sourceLanguageLabel,
+          targetLanguageLabel: args.targetLanguageLabel,
+        }),
+        temperature: 0.2,
+        timeout: TRANSLATION_TIMEOUT_MS,
+      });
+      const translations = parseSegmentTranslations({
+        expectedIds: items.map((item) => item.id),
+        text,
+      });
+      const translatedSegments = applySegmentTranslations({
+        segments: args.segments as DisplayTranscriptSegment[],
+        translations,
+      });
+      const openRouterUsage = providerMetadata?.openrouter?.usage as
+        | {
+            cost?: number;
+            totalTokens?: number;
+          }
+        | undefined;
+
+      await ctx.runMutation(internal.entries.recordUsageEvent, {
+        createdAt: Date.now(),
+        entryId: args.entryId,
+        event: {
+          completionTokens: usage.outputTokens,
+          estimatedCostUsd: openRouterUsage?.cost,
+          metadata: JSON.stringify({ totalTokens: openRouterUsage?.totalTokens }),
+          model,
+          promptTokens: usage.inputTokens,
+          provider: 'openrouter',
+          providerReportedCostUsd: openRouterUsage?.cost,
+          quantity: usage.totalTokens,
+          stage: 'translation',
+          status: 'succeeded',
+          totalTokens: usage.totalTokens,
+          unitType: 'token',
         },
-      }),
-      prompt: buildSegmentTranslationPrompt({
-        items,
-        sourceLanguageLabel: args.sourceLanguageLabel,
-        targetLanguageLabel: args.targetLanguageLabel,
-      }),
-      temperature: 0.2,
-    });
-    const translations = parseSegmentTranslations({
-      expectedIds: items.map((item) => item.id),
-      text,
-    });
-    const translatedSegments = applySegmentTranslations({
-      segments: args.segments as DisplayTranscriptSegment[],
-      translations,
-    });
-    const openRouterUsage = providerMetadata?.openrouter?.usage as
-      | {
-          cost?: number;
-          totalTokens?: number;
-        }
-      | undefined;
+      });
 
-    await ctx.runMutation(internal.entries.recordUsageEvent, {
-      createdAt: Date.now(),
-      entryId: args.entryId,
-      event: {
-        completionTokens: usage.outputTokens,
-        estimatedCostUsd: openRouterUsage?.cost,
-        metadata: JSON.stringify({ totalTokens: openRouterUsage?.totalTokens }),
-        model,
-        promptTokens: usage.inputTokens,
-        provider: 'openrouter',
-        providerReportedCostUsd: openRouterUsage?.cost,
-        quantity: usage.totalTokens,
-        stage: 'translation',
-        status: 'succeeded',
-        totalTokens: usage.totalTokens,
-        unitType: 'token',
-      },
-    });
+      return {
+        elapsedSec: (Date.now() - startedAt) / 1000,
+        segments: translatedSegments,
+      };
+    } catch (error) {
+      await ctx.runMutation(internal.entries.recordUsageEvent, {
+        createdAt: Date.now(),
+        entryId: args.entryId,
+        event: {
+          metadata: JSON.stringify({
+            batchSize: items.length,
+            error: getErrorMessage(error),
+            maxOutputTokens: TRANSLATION_MAX_OUTPUT_TOKENS,
+            timeoutSec: TRANSLATION_TIMEOUT_MS / 1000,
+          }),
+          model,
+          provider: 'openrouter',
+          stage: 'translation',
+          status: 'failed',
+        },
+      });
 
-    return {
-      elapsedSec: (Date.now() - startedAt) / 1000,
-      segments: translatedSegments,
-    };
+      throw error;
+    }
   },
 });

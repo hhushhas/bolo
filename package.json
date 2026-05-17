@@ -19,6 +19,7 @@
     "@openrouter/ai-sdk-provider": "^2.5.1",
     "ai": "^6.0.158",
     "convex": "^1.35.1",
+    "effect": "^3.21.2",
     "expo": "~54.0.33",
     "expo-clipboard": "^55.0.13",
     "expo-haptics": "^55.0.14",
