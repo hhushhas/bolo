@@ -1,0 +1,25 @@
+name = "bolo-media-prep"
+main = "src/index.ts"
+compatibility_date = "2026-05-17"
+
+[[containers]]
+class_name = "MediaPrepContainer"
+image = "./Dockerfile"
+instance_type = "standard-2"
+max_instances = 20
+
+[[durable_objects.bindings]]
+name = "MEDIA_PREP"
+class_name = "MediaPrepContainer"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MediaPrepContainer"]
+
+[[r2_buckets]]
+binding = "MEDIA_BUCKET"
+bucket_name = "bolo-media"
+
+[vars]
+CHUNK_SECONDS = "45"
+MAX_VIDEO_SECONDS = "7200"

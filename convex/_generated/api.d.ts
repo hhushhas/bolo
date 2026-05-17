@@ -9,7 +9,10 @@
  */
 
 import type * as entries from "../entries.js";
+import type * as syncPipeline from "../syncPipeline.js";
+import type * as syncedVideoWorkflow from "../syncedVideoWorkflow.js";
 import type * as transcribe from "../transcribe.js";
+import type * as workflow from "../workflow.js";
 
 import type {
   ApiFromModules,
@@ -19,7 +22,10 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   entries: typeof entries;
+  syncPipeline: typeof syncPipeline;
+  syncedVideoWorkflow: typeof syncedVideoWorkflow;
   transcribe: typeof transcribe;
+  workflow: typeof workflow;
 }>;
 
 /**
@@ -48,4 +54,6 @@ export declare const internal: FilterApi<
   FunctionReference<any, "internal">
 >;
 
-export declare const components: {};
+export declare const components: {
+  workflow: import("@convex-dev/workflow/_generated/component.js").ComponentApi<"workflow">;
+};

@@ -22,7 +22,7 @@ export function GuideCard({
       style={styles.hero}
     >
       <Text style={styles.eyebrow}>How it works</Text>
-      <Text style={styles.title}>Paste. Preview. Transcribe. Share.</Text>
+      <Text style={styles.title}>Paste. Preview. Watch. Translate.</Text>
       <Text style={styles.subtitle}>
         This screen is built to feel calm and obvious, even on a first try.
       </Text>
@@ -31,7 +31,7 @@ export function GuideCard({
         {[
           'Paste a YouTube video or Shorts link.',
           'Check the thumbnail and title before you continue.',
-          'Read, copy, or share the transcript and translation.',
+          'Watch with synced original text and translation.',
         ].map((step, index) => (
           <View key={step} style={styles.stepRow}>
             <View style={[styles.stepBadge, { backgroundColor: colors.accentStrong }]}>

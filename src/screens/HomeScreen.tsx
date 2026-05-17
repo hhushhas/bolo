@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -19,6 +19,8 @@ import * as Haptics from 'expo-haptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LanguagePickerSheet } from '../components/LanguagePickerSheet';
+import { SyncedVideoPlayer } from '../components/SyncedVideoPlayer';
+import { YouTubeVideoSlot } from '../components/YouTubeVideoSlot';
 import { defaultTargetLanguage, getLanguageLabel, languageOptions } from '../constants/languages';
 import { palette, spacing } from '../constants/theme';
 import {
@@ -33,29 +35,28 @@ import {
   getFriendlyFailureCopy,
   languagePresets,
 } from '../lib/reader';
+import type { DisplayTranscriptSegment, ProcessingDebugReport } from '../lib/syncedTranscript';
 import type { Doc } from '../../convex/_generated/dataModel';
 
 const { width } = Dimensions.get('window');
 const isSmallDevice = width < 375;
-
-const getProcessingCopy = (entry: Doc<'entries'> | null) => {
-  if (!entry) {
-    return 'We are getting your reader ready.';
-  }
-  return entry.processingStage ?? 'We are getting your reader ready.';
-};
 
 export function HomeScreen({
   backendReady,
   entries,
   isWorking,
   onToggleFavorite,
+  onSelectEntry,
   onTranscribe,
+  selectedEntryId,
+  syncedDebugReport,
+  syncedSegments,
 }: {
   backendReady: boolean;
   entries: Doc<'entries'>[];
   isWorking: boolean;
   onToggleFavorite: (entryId: Doc<'entries'>['_id']) => Promise<void>;
+  onSelectEntry: (entryId: Doc<'entries'>['_id']) => void;
   onTranscribe: (args: {
     channelTitle?: string;
     sourceLanguage: string;
@@ -67,19 +68,28 @@ export function HomeScreen({
     videoId: string;
     youtubeUrl: string;
   }) => Promise<Doc<'entries'>['_id'] | null>;
+  selectedEntryId: Doc<'entries'>['_id'] | null;
+  syncedDebugReport?: ProcessingDebugReport;
+  syncedSegments: DisplayTranscriptSegment[];
 }) {
   const scheme = useColorScheme();
   const colors = palette[scheme === 'dark' ? 'dark' : 'light'];
   
   const [url, setUrl] = useState('');
   const [view, setView] = useState<'history' | 'input' | 'reading'>('input');
-  const [selectedEntryId, setSelectedEntryId] = useState<Doc<'entries'>['_id'] | null>(null);
   const [preview, setPreview] = useState<YouTubePreview | null>(null);
   const [isPreviewLoading, setIsPreviewLoading] = useState(false);
   const [targetLanguage, setTargetLanguage] = useState<string>(defaultTargetLanguage.code);
   const [pickerVisible, setPickerVisible] = useState(false);
   const [historyQuery, setHistoryQuery] = useState('');
   const [readerMode, setReaderMode] = useState<'transcript' | 'translation'>('translation');
+  const [playerMode, setPlayerMode] = useState<'bilingual' | 'original' | 'translation'>('bilingual');
+  const [playbackRate, setPlaybackRate] = useState(1);
+  const [playerActiveMs, setPlayerActiveMs] = useState(0);
+  const [playerAutoScrollEnabled, setPlayerAutoScrollEnabled] = useState(true);
+  const [playerDurationMs, setPlayerDurationMs] = useState(0);
+  const [playerIsPlaying, setPlayerIsPlaying] = useState(false);
+  const [playerSeekRequestMs, setPlayerSeekRequestMs] = useState<number | null>(null);
   const [textSize, setTextSize] = useState(24);
   const [isFocused, setIsFocused] = useState(false);
   const [wasAutoPasted, setWasAutoPasted] = useState(false);
@@ -91,9 +101,9 @@ export function HomeScreen({
 
   useEffect(() => {
     if (!selectedEntryId && entries[0]) {
-      setSelectedEntryId(entries[0]._id);
+      onSelectEntry(entries[0]._id);
     }
-  }, [entries, selectedEntryId]);
+  }, [entries, onSelectEntry, selectedEntryId]);
 
   useEffect(() => {
     if (!selectedEntry) return;
@@ -107,7 +117,14 @@ export function HomeScreen({
   useEffect(() => {
     const checkClipboard = async () => {
       if (url.trim()) return;
-      const content = await Clipboard.getStringAsync();
+      let content = '';
+
+      try {
+        content = await Clipboard.getStringAsync();
+      } catch {
+        return;
+      }
+
       const parsed = parseYouTubeUrl(content);
       if (!parsed || wasAutoPasted) return;
       setUrl(parsed.cleanUrl);
@@ -181,7 +198,7 @@ export function HomeScreen({
       return;
     }
     if (!backendReady) {
-      Alert.alert('Almost ready', 'We are setting up your reader. Please try again in a few seconds.');
+      Alert.alert('Almost ready', 'We are setting up video translation. Please try again in a few seconds.');
       return;
     }
 
@@ -199,7 +216,7 @@ export function HomeScreen({
     });
 
     if (entryId) {
-      setSelectedEntryId(entryId);
+      onSelectEntry(entryId);
       setView('reading');
     }
   };
@@ -213,7 +230,7 @@ export function HomeScreen({
       Alert.alert('Still working', 'Please wait until the text is ready.');
       return;
     }
-    const title = selectedEntry?.title ?? 'YouTube Reader';
+    const title = selectedEntry?.title ?? 'Bolo video';
     await Linking.openURL(buildWhatsAppShareUrl(formatShareText({ content, title, viewLabel })));
   };
 
@@ -225,6 +242,18 @@ export function HomeScreen({
     await Clipboard.setStringAsync(content);
     Alert.alert('Copied!', `${label} is ready to paste.`);
   };
+
+  const handlePlayerSeek = useCallback((timeMs: number) => {
+    const durationMs = Math.max(playerDurationMs, syncedSegments.at(-1)?.endMs ?? 0);
+    const nextTimeMs = Math.max(0, Math.min(timeMs, durationMs || timeMs));
+
+    setPlayerActiveMs(nextTimeMs);
+    setPlayerSeekRequestMs(nextTimeMs);
+  }, [playerDurationMs, syncedSegments]);
+
+  const handlePlayerSeekBy = useCallback((offsetMs: number) => {
+    handlePlayerSeek(playerActiveMs + offsetMs);
+  }, [handlePlayerSeek, playerActiveMs]);
 
   const renderReaderModes = () => {
     if (!selectedEntry) return null;
@@ -265,6 +294,9 @@ export function HomeScreen({
 
   const renderReadingView = () => {
     if (!selectedEntry) return null;
+
+    const syncedReady = selectedEntry.processingVersion === 2 && syncedSegments.length > 0;
+
     return (
       <SafeAreaView style={[styles.safeArea, { backgroundColor: isFocused ? colors.reader : colors.background }]}>
         <View style={[styles.header, { borderBottomWidth: 3, borderColor: colors.border }]}>
@@ -303,6 +335,43 @@ export function HomeScreen({
           </View>
         </View>
 
+        {syncedReady ? (
+          <SyncedVideoPlayer
+            activeMs={playerActiveMs}
+            autoScrollEnabled={playerAutoScrollEnabled}
+            colors={colors}
+            debugReport={syncedDebugReport}
+            durationMs={Math.max(
+              playerDurationMs,
+              selectedEntry.durationSec ? selectedEntry.durationSec * 1000 : 0,
+              syncedSegments.at(-1)?.endMs ?? 0,
+            )}
+            isPlaying={playerIsPlaying}
+            mode={playerMode}
+            onChangeMode={setPlayerMode}
+            onSeek={handlePlayerSeek}
+            onSeekBy={handlePlayerSeekBy}
+            onToggleAutoScroll={() => setPlayerAutoScrollEnabled((current) => !current)}
+            onTogglePlaying={() => setPlayerIsPlaying((current) => !current)}
+            playbackRate={playbackRate}
+            segments={syncedSegments}
+            setPlaybackRate={setPlaybackRate}
+            title={selectedEntry.title}
+            videoSlot={
+              <YouTubeVideoSlot
+                colors={colors}
+                isPlaying={playerIsPlaying}
+                onDurationChange={setPlayerDurationMs}
+                onError={(message) => Alert.alert('Video problem', message)}
+                onPlayingChange={setPlayerIsPlaying}
+                onTimeChange={setPlayerActiveMs}
+                playbackRate={playbackRate}
+                seekRequestMs={playerSeekRequestMs}
+                videoId={selectedEntry.videoId}
+              />
+            }
+          />
+        ) : (
         <View style={styles.readingContainer}>
           <ScrollView contentContainerStyle={styles.readingContent} showsVerticalScrollIndicator={false}>
             {!isFocused && (
@@ -460,6 +529,7 @@ export function HomeScreen({
             </Pressable>
           </View>
         </View>
+        )}
       </SafeAreaView>
     );
   };
@@ -497,7 +567,7 @@ export function HomeScreen({
             <Pressable
               key={entry._id}
               onPress={() => {
-                setSelectedEntryId(entry._id);
+                onSelectEntry(entry._id);
                 setView('reading');
               }}
               style={[styles.historyItem, { backgroundColor: colors.surface, borderColor: colors.border }]}
@@ -535,9 +605,9 @@ export function HomeScreen({
           <View style={[styles.iconContainer, { backgroundColor: colors.backgroundAccent, borderColor: colors.border }]}>
             <MaterialCommunityIcons name="book-open-page-variant" size={42} color={colors.accent} />
           </View>
-          <Text style={[styles.title, { color: colors.text }]}>YouTube Reader</Text>
+          <Text style={[styles.title, { color: colors.text }]}>Bolo Video</Text>
           <Text style={[styles.subtitle, { color: colors.textSoft }]}>
-            Paste a YouTube link, choose the language, and we will make an easy reader for you.
+            Paste a YouTube link, choose the language, and watch with a synced translation.
           </Text>
         </View>
 
@@ -610,7 +680,7 @@ export function HomeScreen({
               >
                 <View style={styles.buttonContent}>
                   {isWorking ? <ActivityIndicator color="#fff" size="small" /> : null}
-                  <Text style={styles.bigButtonText}>{isWorking ? 'Starting Reader...' : '2. Read the Video'}</Text>
+                  <Text style={styles.bigButtonText}>{isWorking ? 'Preparing video...' : '2. Watch with Translation'}</Text>
                 </View>
               </Pressable>
               <View style={[styles.buttonShadow, { backgroundColor: colors.border }]} />
@@ -624,7 +694,7 @@ export function HomeScreen({
             style={[styles.secondaryButton, { borderColor: colors.border, backgroundColor: colors.background }]}
           >
             <MaterialCommunityIcons color={colors.text} name="history" size={24} />
-            <Text style={[styles.secondaryButtonText, { color: colors.text }]}>View my old videos</Text>
+            <Text style={[styles.secondaryButtonText, { color: colors.text }]}>View saved videos</Text>
           </Pressable>
         </View>
       </ScrollView>
