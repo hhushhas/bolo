@@ -8,6 +8,7 @@ import {
   mergeTranscriptSegments,
   parseSegmentTranslations,
   shiftChunkSegments,
+  splitDisplaySegmentsForCaptions,
 } from './syncedTranscript';
 
 describe('shiftChunkSegments', () => {
@@ -85,8 +86,33 @@ describe('mergeTranscriptSegments', () => {
       ],
     });
 
-    expect(segments[0]?.endMs).toBe(21_000);
-    expect(segments[0]?.originalText).toBe('One two three');
+    expect(segments).toHaveLength(3);
+    expect(segments[0]?.endMs).toBe(7_000);
+    expect(segments[0]?.originalText).toBe('One');
+  });
+});
+
+describe('splitDisplaySegmentsForCaptions', () => {
+  it('splits long translated segments into caption-sized chunks', () => {
+    const segments = splitDisplaySegmentsForCaptions({
+      maxChars: 24,
+      segments: [
+        {
+          endMs: 12_000,
+          index: 0,
+          originalText: 'Original long line.',
+          sourceChunkIndexes: [0],
+          startMs: 0,
+          translatedText: 'The first short caption should become several readable pieces.',
+        },
+      ],
+    });
+
+    expect(segments).toMatchObject([
+      { index: 0, startMs: 0, translatedText: 'The first short caption' },
+      { index: 1, startMs: 4_000, translatedText: 'should become several' },
+      { index: 2, startMs: 8_000, endMs: 12_000, translatedText: 'readable pieces.' },
+    ]);
   });
 });
 

@@ -110,8 +110,8 @@ export const shiftChunkSegments = ({
   });
 
 export const mergeTranscriptSegments = ({
-  maxDurationMs = 18000,
-  minDurationMs = 8000,
+  maxDurationMs = 6000,
+  minDurationMs = 2500,
   segments,
 }: {
   maxDurationMs?: number;
@@ -180,6 +180,63 @@ export const mergeTranscriptSegments = ({
   flush();
 
   return merged;
+};
+
+const splitCaptionText = (text: string, maxChars: number) => {
+  const words = normalizeWhitespace(text).split(' ').filter(Boolean);
+  const lines: string[] = [];
+  let current = '';
+
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word;
+
+    if (current && next.length > maxChars) {
+      lines.push(current);
+      current = word;
+      continue;
+    }
+
+    current = next;
+  }
+
+  if (current) {
+    lines.push(current);
+  }
+
+  return lines.length > 0 ? lines : [normalizeWhitespace(text)];
+};
+
+export const splitDisplaySegmentsForCaptions = ({
+  maxChars = 72,
+  segments,
+}: {
+  maxChars?: number;
+  segments: DisplayTranscriptSegment[];
+}): DisplayTranscriptSegment[] => {
+  const captionSegments = segments.flatMap((segment) => {
+    const displayText = segment.translatedText || segment.originalText;
+    const parts = splitCaptionText(displayText, maxChars);
+
+    if (parts.length <= 1) {
+      return [segment];
+    }
+
+    const durationMs = Math.max(1, segment.endMs - segment.startMs);
+    const sliceMs = durationMs / parts.length;
+
+    return parts.map((part, index) => ({
+      ...segment,
+      endMs: Math.round(index === parts.length - 1 ? segment.endMs : segment.startMs + sliceMs * (index + 1)),
+      startMs: Math.round(segment.startMs + sliceMs * index),
+      translatedText: segment.translatedText ? part : '',
+      originalText: segment.translatedText ? segment.originalText : part,
+    }));
+  });
+
+  return captionSegments.map((segment, index) => ({
+    ...segment,
+    index,
+  }));
 };
 
 export const estimateCloudflareWhisperCost = ({

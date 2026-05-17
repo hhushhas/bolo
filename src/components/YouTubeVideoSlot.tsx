@@ -35,7 +35,10 @@ export function YouTubeVideoSlot({
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const landscape = width > height;
-  const playerWidth = Math.round(landscape ? width * 0.54 : width);
+  const landscapeLeftPaneWidth = width / 1.62;
+  const playerWidth = Math.round(
+    landscape ? Math.min(landscapeLeftPaneWidth, height * 16 / 9) : width,
+  );
   const playerHeight = Math.round(playerWidth * 9 / 16);
 
   useEffect(() => {

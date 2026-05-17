@@ -10,7 +10,10 @@ export function YouTubeVideoSlot({
 }: YouTubeVideoSlotProps) {
   const { height, width } = useWindowDimensions();
   const landscape = width > height;
-  const playerWidth = Math.round(landscape ? width * 0.54 : width);
+  const landscapeLeftPaneWidth = width / 1.62;
+  const playerWidth = Math.round(
+    landscape ? Math.min(landscapeLeftPaneWidth, height * 16 / 9) : width,
+  );
   const playerHeight = Math.round((playerWidth * 9) / 16);
   const startSeconds = seekRequestMs === null ? 0 : Math.max(0, Math.floor(seekRequestMs / 1000));
   const src = useMemo(() => {

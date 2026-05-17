@@ -206,6 +206,55 @@ export function HomeScreen({
 
     const syncedReady = selectedEntry.processingVersion === 2 && syncedSegments.length > 0;
 
+    if (syncedReady) {
+      return (
+        <SafeAreaView edges={[]} style={[styles.safeArea, { backgroundColor: colors.background }]}>
+          <SyncedVideoPlayer
+            activeMs={playerActiveMs}
+            colors={colors}
+            debugReport={syncedDebugReport}
+            onSeek={handlePlayerSeek}
+            segments={syncedSegments}
+            topLeftControls={
+              <Pressable
+                onPress={() => {
+                  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                  setView('input');
+                }}
+                style={[styles.floatingBackButton, { borderColor: colors.border, backgroundColor: colors.background }]}
+              >
+                <MaterialCommunityIcons name="chevron-left" size={26} color={colors.text} />
+                <Text style={[styles.floatingBackText, { color: colors.text }]}>Back</Text>
+              </Pressable>
+            }
+            topRightControls={
+              <Pressable
+                onPress={() => handleToggleFavorite(selectedEntry._id)}
+                style={[styles.floatingIconButton, { borderColor: colors.border, backgroundColor: colors.background }]}
+              >
+                <MaterialCommunityIcons
+                  color={selectedEntry.favorite ? colors.accent : colors.textSoft}
+                  name={selectedEntry.favorite ? 'star' : 'star-outline'}
+                  size={22}
+                />
+              </Pressable>
+            }
+            videoSlot={
+              <YouTubeVideoSlot
+                colors={colors}
+                onDurationChange={setPlayerDurationMs}
+                onError={(message) => Alert.alert('Video problem', message)}
+                onPlayingChange={() => undefined}
+                onTimeChange={setPlayerActiveMs}
+                seekRequestMs={playerSeekRequestMs}
+                videoId={selectedEntry.videoId}
+              />
+            }
+          />
+        </SafeAreaView>
+      );
+    }
+
     return (
       <SafeAreaView style={[styles.safeArea, { backgroundColor: colors.background }]}>
         <View style={[styles.header, { borderBottomWidth: 1, borderColor: colors.border }]}>
@@ -234,27 +283,7 @@ export function HomeScreen({
           </View>
         </View>
 
-        {syncedReady ? (
-          <SyncedVideoPlayer
-            activeMs={playerActiveMs}
-            colors={colors}
-            debugReport={syncedDebugReport}
-            onSeek={handlePlayerSeek}
-            segments={syncedSegments}
-            videoSlot={
-              <YouTubeVideoSlot
-                colors={colors}
-                onDurationChange={setPlayerDurationMs}
-                onError={(message) => Alert.alert('Video problem', message)}
-                onPlayingChange={() => undefined}
-                onTimeChange={setPlayerActiveMs}
-                seekRequestMs={playerSeekRequestMs}
-                videoId={selectedEntry.videoId}
-              />
-            }
-          />
-        ) : (
-          <View style={styles.processingState}>
+        <View style={styles.processingState}>
             {selectedEntry.status === 'failed' ? (
               <>
                 <MaterialCommunityIcons name="alert-circle-outline" size={40} color={colors.danger} />
@@ -279,8 +308,7 @@ export function HomeScreen({
                 </Text>
               </>
             )}
-          </View>
-        )}
+        </View>
       </SafeAreaView>
     );
   };
@@ -489,6 +517,24 @@ const styles = StyleSheet.create({
   extraTitle: { fontSize: 22, fontWeight: '800' },
   extrasSection: { gap: spacing.lg, marginTop: spacing.xl },
   footer: { alignItems: 'center', marginTop: spacing.xl },
+  floatingBackButton: {
+    alignItems: 'center',
+    borderRadius: 14,
+    borderWidth: 2,
+    flexDirection: 'row',
+    height: 44,
+    paddingLeft: 6,
+    paddingRight: 12,
+  },
+  floatingBackText: { fontSize: 17, fontWeight: '900' },
+  floatingIconButton: {
+    alignItems: 'center',
+    borderRadius: 14,
+    borderWidth: 2,
+    height: 44,
+    justifyContent: 'center',
+    width: 44,
+  },
   glassBtn: { alignItems: 'center', borderRadius: 999, borderWidth: 2, height: 42, justifyContent: 'center', width: 42 },
   glassBtnText: { fontSize: 16, fontWeight: '800' },
   glassesControl: { flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 'auto' },

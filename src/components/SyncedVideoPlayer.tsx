@@ -13,8 +13,6 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { spacing } from '../constants/theme';
 import { buildDebugReportText, type DisplayTranscriptSegment, type ProcessingDebugReport } from '../lib/syncedTranscript';
 
-type LandscapeMode = 'split' | 'overlay';
-
 type SyncedVideoPlayerProps = {
   activeMs: number;
   colors: {
@@ -31,6 +29,8 @@ type SyncedVideoPlayerProps = {
   debugReport?: ProcessingDebugReport;
   onSeek: (timeMs: number) => void;
   segments: DisplayTranscriptSegment[];
+  topLeftControls?: React.ReactNode;
+  topRightControls?: React.ReactNode;
   videoSlot?: React.ReactNode;
 };
 
@@ -48,11 +48,12 @@ export function SyncedVideoPlayer({
   debugReport,
   onSeek,
   segments,
+  topLeftControls,
+  topRightControls,
   videoSlot,
 }: SyncedVideoPlayerProps) {
   const { height, width } = useWindowDimensions();
   const [debugVisible, setDebugVisible] = useState(false);
-  const [landscapeMode, setLandscapeMode] = useState<LandscapeMode>('split');
   const scrollRef = useRef<ScrollView | null>(null);
   const landscape = width > height;
   const activeSegmentIndex = Math.max(
@@ -63,10 +64,6 @@ export function SyncedVideoPlayer({
   const debugText = useMemo(
     () => (debugReport ? buildDebugReportText(debugReport) : ''),
     [debugReport],
-  );
-  const overlaySegments = useMemo(
-    () => segments.slice(activeSegmentIndex, activeSegmentIndex + 2),
-    [activeSegmentIndex, segments],
   );
 
   useEffect(() => {
@@ -113,57 +110,8 @@ export function SyncedVideoPlayer({
     </View>
   );
 
-  const layoutToggle = landscape ? (
-    <Pressable
-      accessibilityLabel={landscapeMode === 'split' ? 'Show translation over video' : 'Show translation beside video'}
-      onPress={() => setLandscapeMode((current) => (current === 'split' ? 'overlay' : 'split'))}
-      style={[styles.layoutToggle, { backgroundColor: colors.surface, borderColor: colors.border }]}
-    >
-      <MaterialCommunityIcons
-        name={landscapeMode === 'split' ? 'image-text' : 'view-split-vertical'}
-        size={22}
-        color={colors.text}
-      />
-    </Pressable>
-  ) : null;
-
-  const overlayCaption = landscape && landscapeMode === 'overlay' ? (
-    <View style={styles.overlayCaptionWrap} pointerEvents="box-none">
-      <View style={styles.overlayCaptionPanel}>
-        {overlaySegments.map((segment, index) => (
-          <Pressable
-            key={`${segment.index}-${segment.startMs}-overlay`}
-            onPress={() => onSeek(segment.startMs)}
-            style={index === 0 ? styles.overlayActiveSegment : styles.overlayNextSegment}
-          >
-            <Text style={[styles.overlayTime, { color: index === 0 ? colors.accent : '#d9d0a7' }]}>
-              {formatClock(segment.startMs)}
-            </Text>
-            <Text
-              numberOfLines={index === 0 ? 2 : 1}
-              style={[styles.overlayText, { color: colors.reader, opacity: index === 0 ? 1 : 0.82 }]}
-            >
-              {segment.translatedText || segment.originalText}
-            </Text>
-          </Pressable>
-        ))}
-      </View>
-    </View>
-  ) : null;
-
   const transcript = (
     <View style={styles.transcriptPanel}>
-      {debugReport ? (
-        <View style={styles.infoRow}>
-          <Pressable
-            onPress={() => setDebugVisible(true)}
-            style={[styles.infoButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
-          >
-            <MaterialCommunityIcons name="information-outline" size={22} color={colors.text} />
-          </Pressable>
-        </View>
-      ) : null}
-
       <ScrollView ref={scrollRef} contentContainerStyle={styles.segmentList} showsVerticalScrollIndicator={false}>
         {segments.map(renderSegment)}
       </ScrollView>
@@ -178,26 +126,22 @@ export function SyncedVideoPlayer({
         { backgroundColor: colors.background },
       ]}
     >
-      {landscape && landscapeMode === 'overlay' ? (
-        <View style={styles.overlayPlayer}>
-          {player}
-          {layoutToggle}
-          {debugReport ? (
-            <Pressable
-              onPress={() => setDebugVisible(true)}
-              style={[styles.overlayInfoButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
-            >
-              <MaterialCommunityIcons name="information-outline" size={22} color={colors.text} />
-            </Pressable>
-          ) : null}
-          {overlayCaption}
-        </View>
-      ) : landscape ? (
+      {topLeftControls ? <View style={styles.topLeftControls}>{topLeftControls}</View> : null}
+      <View style={styles.topRightControls}>
+        {topRightControls}
+        {debugReport ? (
+          <Pressable
+            onPress={() => setDebugVisible(true)}
+            style={[styles.floatingIconButton, { borderColor: colors.border, backgroundColor: colors.surface }]}
+          >
+            <MaterialCommunityIcons name="information-outline" size={22} color={colors.text} />
+          </Pressable>
+        ) : null}
+      </View>
+
+      {landscape ? (
         <>
-          <View style={styles.landscapePlayer}>
-            {player}
-            {layoutToggle}
-          </View>
+          <View style={styles.landscapePlayer}>{player}</View>
           <View style={styles.landscapeTranscript}>{transcript}</View>
         </>
       ) : (
@@ -242,22 +186,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 42,
   },
-  compactButton: {
-    alignItems: 'center',
-    borderRadius: 14,
-    borderWidth: 2,
-    flexDirection: 'row',
-    gap: 6,
-    minHeight: 42,
-    paddingHorizontal: spacing.sm,
-  },
-  compactButtonText: {
-    fontSize: 14,
-    fontWeight: '800',
-  },
   container: {
     flex: 1,
-    gap: spacing.xs,
   },
   copyButton: {
     alignItems: 'center',
@@ -293,7 +223,7 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '900',
   },
-  infoButton: {
+  floatingIconButton: {
     alignItems: 'center',
     borderRadius: 14,
     borderWidth: 2,
@@ -301,34 +231,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 44,
   },
-  infoRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    minHeight: 44,
-  },
   landscapeContainer: {
     flexDirection: 'row',
-    padding: spacing.xs,
   },
   landscapePlayer: {
-    flex: 1.25,
-    position: 'relative',
+    flex: 1,
+    minWidth: 0,
   },
   landscapeTranscript: {
-    flex: 1,
-  },
-  layoutToggle: {
-    alignItems: 'center',
-    borderRadius: 12,
-    borderWidth: 1,
-    height: 42,
-    justifyContent: 'center',
-    position: 'absolute',
-    right: spacing.xs,
-    top: spacing.xs,
-    width: 42,
-    zIndex: 3,
+    flex: 0.62,
+    minWidth: 0,
   },
   modalBackdrop: {
     alignItems: 'center',
@@ -341,69 +253,21 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
     overflow: 'hidden',
   },
-  overlayActiveSegment: {
-    gap: 3,
-  },
-  overlayCaptionPanel: {
-    backgroundColor: 'rgba(24, 25, 25, 0.82)',
-    borderRadius: 8,
-    gap: 8,
-    maxWidth: 720,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    width: '86%',
-  },
-  overlayCaptionWrap: {
-    alignItems: 'center',
-    bottom: 54,
-    left: 0,
-    position: 'absolute',
-    right: 0,
-    zIndex: 2,
-  },
-  overlayInfoButton: {
-    alignItems: 'center',
-    borderRadius: 12,
-    borderWidth: 1,
-    height: 42,
-    justifyContent: 'center',
-    position: 'absolute',
-    right: spacing.xs,
-    top: spacing.xs + 48,
-    width: 42,
-    zIndex: 3,
-  },
-  overlayNextSegment: {
-    gap: 2,
-  },
-  overlayPlayer: {
-    flex: 1,
-    position: 'relative',
-  },
-  overlayText: {
-    fontSize: 18,
-    fontWeight: '800',
-    lineHeight: 24,
-  },
-  overlayTime: {
-    fontSize: 12,
-    fontWeight: '900',
-  },
   portraitContainer: {
     paddingHorizontal: 0,
-    paddingVertical: spacing.xs,
   },
   segment: {
     borderLeftWidth: 4,
-    borderRadius: 8,
+    borderRadius: 6,
     borderWidth: 0,
-    gap: 4,
+    gap: 2,
     paddingHorizontal: spacing.sm,
-    paddingVertical: 10,
+    paddingVertical: 8,
   },
   segmentList: {
-    gap: 4,
-    paddingBottom: spacing.lg,
+    gap: 2,
+    paddingBottom: spacing.md,
+    paddingTop: spacing.xs,
   },
   segmentTime: {
     fontSize: 12,
@@ -430,14 +294,27 @@ const styles = StyleSheet.create({
   },
   transcriptPanel: {
     flex: 1,
-    gap: spacing.xs,
     minHeight: 0,
     paddingHorizontal: spacing.sm,
   },
   translationText: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
-    lineHeight: 29,
+    lineHeight: 25,
+  },
+  topLeftControls: {
+    left: spacing.sm,
+    position: 'absolute',
+    top: spacing.sm,
+    zIndex: 4,
+  },
+  topRightControls: {
+    flexDirection: 'row',
+    gap: spacing.xs,
+    position: 'absolute',
+    right: spacing.sm,
+    top: spacing.sm,
+    zIndex: 4,
   },
   videoPlaceholder: {
     alignItems: 'center',

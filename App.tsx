@@ -6,7 +6,11 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { api } from './convex/_generated/api';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { parseYouTubeUrl } from './src/lib/youtube';
-import type { DisplayTranscriptSegment, ProcessingDebugReport } from './src/lib/syncedTranscript';
+import {
+  splitDisplaySegmentsForCaptions,
+  type DisplayTranscriptSegment,
+  type ProcessingDebugReport,
+} from './src/lib/syncedTranscript';
 import type { Id } from './convex/_generated/dataModel';
 
 const convexUrl = process.env.EXPO_PUBLIC_CONVEX_URL;
@@ -43,14 +47,16 @@ function ConnectedApp() {
 
   const mappedSyncedSegments = useMemo<DisplayTranscriptSegment[]>(
     () =>
-      (queriedSyncedSegments ?? emptySyncedSegments).map((segment) => ({
-        endMs: segment.endMs,
-        index: segment.index,
-        originalText: segment.originalText,
-        sourceChunkIndexes: segment.sourceChunkIndexes,
-        startMs: segment.startMs,
-        translatedText: segment.translatedText,
-      })),
+      splitDisplaySegmentsForCaptions({
+        segments: (queriedSyncedSegments ?? emptySyncedSegments).map((segment) => ({
+          endMs: segment.endMs,
+          index: segment.index,
+          originalText: segment.originalText,
+          sourceChunkIndexes: segment.sourceChunkIndexes,
+          startMs: segment.startMs,
+          translatedText: segment.translatedText,
+        })),
+      }),
     [queriedSyncedSegments],
   );
 
