@@ -70,7 +70,7 @@ const createJobId = () =>
     : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
 const DEFAULT_FETCH_TIMEOUT_MS = 120_000;
-const MEDIA_PREP_TIMEOUT_MS = 20 * 60_000;
+const MEDIA_PREP_TIMEOUT_MS = 8.5 * 60_000;
 const WHISPER_TIMEOUT_MS = 6 * 60_000;
 
 const requireEnv = (name: keyof typeof envByName) => {
@@ -111,7 +111,7 @@ const fetchJson = async <T>(
 
     if (controller.signal.aborted) {
       throw new Error(
-        `${options.serviceName} timed out after ${formatDuration(timeoutMs)}. This is a backend processing issue; please retry.`,
+        `${options.serviceName} timed out after ${formatDuration(timeoutMs)}. This is a backend processing issue; the media-prep job did not return before Convex's action time limit.`,
       );
     }
 
