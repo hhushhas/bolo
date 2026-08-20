@@ -1,8 +1,8 @@
 type WhisperWorkerEnv = {
-  AI: {
-    run: (model: string, input: Record<string, unknown>) => Promise<WhisperResponse>;
-  };
   BOLO_WORKER_SECRET: string;
+  GROQ_API_KEY: string;
+  GROQ_MODEL?: string;
+  GROQ_UNIT_PRICE_USD?: string;
   MEDIA_BUCKET: {
     delete: (keys: string | string[]) => Promise<void>;
     get: (key: string) => Promise<R2ObjectBody | null>;
@@ -13,8 +13,6 @@ type WhisperWorkerEnv = {
       }[];
     }>;
   };
-  WHISPER_MODEL?: string;
-  WHISPER_UNIT_PRICE_USD?: string;
 };
 
 type R2ObjectBody = {
@@ -65,8 +63,16 @@ type WhisperResponse = {
   vtt?: string;
 };
 
-const defaultWhisperModel = '@cf/openai/whisper-large-v3-turbo';
-const defaultWhisperUnitPriceUsd = 0.00051;
+type GroqTranscriptionResponse = {
+  segments: WhisperSegment[];
+  text?: string;
+  transcriptionInfo?: WhisperResponse['transcription_info'];
+};
+
+const defaultGroqModel = 'whisper-large-v3-turbo';
+const defaultGroqUnitPriceUsd = 0.04 / 60;
+const groqTranscriptionUrl = 'https://api.groq.com/openai/v1/audio/transcriptions';
+const GROQ_TIMEOUT_MS = 120_000;
 
 const jsonResponse = (body: unknown, init?: ResponseInit) =>
   Response.json(body, {
@@ -138,16 +144,126 @@ const parseListMediaRequest = async (request: Request) => {
   } satisfies ListMediaRequest;
 };
 
-const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
-  const bytes = new Uint8Array(buffer);
-  const chunkSize = 0x8000;
-  let binary = '';
+const getObjectProperty = (value: object, key: string) =>
+  Object.entries(value).find(([property]) => property === key)?.[1];
 
-  for (let index = 0; index < bytes.length; index += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+const readOptionalNumber = (value: unknown) =>
+  typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+
+const readOptionalString = (value: unknown) => (typeof value === 'string' ? value : undefined);
+
+const parseGroqResponse = (payload: unknown): GroqTranscriptionResponse => {
+  if (typeof payload !== 'object' || payload === null || Array.isArray(payload)) {
+    throw new Error('Groq returned an invalid transcription response.');
   }
 
-  return btoa(binary);
+  const segmentsValue = getObjectProperty(payload, 'segments');
+
+  if (segmentsValue !== undefined && !Array.isArray(segmentsValue)) {
+    throw new Error('Groq returned invalid transcription segments.');
+  }
+
+  const segmentValues: unknown[] = Array.isArray(segmentsValue) ? segmentsValue : [];
+  const segments = segmentValues.flatMap((segment) => {
+    if (typeof segment !== 'object' || segment === null || Array.isArray(segment)) {
+      return [];
+    }
+
+    return [
+      {
+        avg_logprob: readOptionalNumber(getObjectProperty(segment, 'avg_logprob')),
+        compression_ratio: readOptionalNumber(getObjectProperty(segment, 'compression_ratio')),
+        end: readOptionalNumber(getObjectProperty(segment, 'end')),
+        no_speech_prob: readOptionalNumber(getObjectProperty(segment, 'no_speech_prob')),
+        start: readOptionalNumber(getObjectProperty(segment, 'start')),
+        text: readOptionalString(getObjectProperty(segment, 'text')),
+      },
+    ];
+  });
+  const duration = readOptionalNumber(getObjectProperty(payload, 'duration'));
+  const language = readOptionalString(getObjectProperty(payload, 'language'));
+
+  return {
+    segments,
+    text: readOptionalString(getObjectProperty(payload, 'text')),
+    transcriptionInfo:
+      duration === undefined && language === undefined ? undefined : { duration, language },
+  };
+};
+
+const transcribeWithGroq = async ({
+  apiKey,
+  audio,
+  initialPrompt,
+  language,
+  model,
+}: {
+  apiKey: string;
+  audio: ArrayBuffer;
+  initialPrompt?: string;
+  language?: string;
+  model: string;
+}) => {
+  if (!apiKey) {
+    throw new Error('Missing GROQ_API_KEY.');
+  }
+
+  const formData = new FormData();
+  formData.append('file', new Blob([audio], { type: 'audio/mpeg' }), 'chunk.mp3');
+  formData.append('model', model);
+  formData.append('response_format', 'verbose_json');
+  formData.append('timestamp_granularities[]', 'segment');
+  formData.append('temperature', '0');
+
+  if (initialPrompt) {
+    formData.append('prompt', initialPrompt);
+  }
+
+  if (language) {
+    formData.append('language', language);
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), GROQ_TIMEOUT_MS);
+  let response: Response;
+
+  try {
+    response = await fetch(groqTranscriptionUrl, {
+      body: formData,
+      headers: {
+        authorization: `Bearer ${apiKey}`,
+      },
+      method: 'POST',
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`Groq transcription timed out after ${GROQ_TIMEOUT_MS / 1000}s.`);
+    }
+
+    throw new Error(
+      `Groq transcription request failed: ${error instanceof Error ? error.message : String(error)}.`,
+    );
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  const responseText = await response.text();
+
+  if (!response.ok) {
+    const details = responseText.slice(0, 500).replace(/\s+/g, ' ').trim();
+    throw new Error(`Groq transcription failed with HTTP ${response.status}${details ? `: ${details}` : '.'}`);
+  }
+
+  let payload: unknown;
+
+  try {
+    payload = JSON.parse(responseText);
+  } catch {
+    throw new Error('Groq returned a non-JSON transcription response.');
+  }
+
+  return parseGroqResponse(payload);
 };
 
 const normalizeWhisperSegments = ({
@@ -253,21 +369,23 @@ const handler = {
       return jsonResponse({ error: 'Audio chunk not found.' }, { status: 404 });
     }
 
-    const model = env.WHISPER_MODEL ?? defaultWhisperModel;
+    const model = env.GROQ_MODEL ?? defaultGroqModel;
     const unitPriceUsd = Number.parseFloat(
-      env.WHISPER_UNIT_PRICE_USD ?? String(defaultWhisperUnitPriceUsd),
+      env.GROQ_UNIT_PRICE_USD ?? String(defaultGroqUnitPriceUsd),
     );
     const audioMinutes = payload.chunkDurationMs / 60_000;
 
     try {
-      const audio = arrayBufferToBase64(await chunk.arrayBuffer());
-      const whisperResponse = await env.AI.run(model, {
-        audio,
-        condition_on_previous_text: false,
-        initial_prompt: payload.initialPrompt,
+      if (!Number.isFinite(unitPriceUsd) || unitPriceUsd <= 0) {
+        throw new Error('Invalid GROQ_UNIT_PRICE_USD configuration.');
+      }
+
+      const groqResponse = await transcribeWithGroq({
+        apiKey: env.GROQ_API_KEY,
+        audio: await chunk.arrayBuffer(),
+        initialPrompt: payload.initialPrompt,
         language: payload.language,
-        task: 'transcribe',
-        vad_filter: true,
+        model,
       });
 
       return jsonResponse({
@@ -279,12 +397,11 @@ const handler = {
         model,
         segments: normalizeWhisperSegments({
           chunkStartMs: payload.chunkStartMs,
-          segments: whisperResponse.segments ?? [],
+          segments: groqResponse.segments,
         }),
-        text: whisperResponse.text,
-        transcriptionInfo: whisperResponse.transcription_info,
+        text: groqResponse.text,
+        transcriptionInfo: groqResponse.transcriptionInfo,
         unitPriceUsd,
-        vtt: whisperResponse.vtt,
       });
     } catch (error) {
       return jsonResponse(

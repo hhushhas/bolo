@@ -8,7 +8,7 @@ Bolo is a calm synced bilingual video player for people who want to paste a YouT
 - YouTube URL preview for normal videos and Shorts
 - Convex-backed history for saved transcripts and translations
 - Convex Workflow pipeline for durable media prep, transcription, translation, and cleanup
-- Cloudflare Worker scaffold for Workers AI `whisper-large-v3-turbo`
+- Cloudflare Worker proxy for Groq `whisper-large-v3-turbo`
 - Cloudflare Container scaffold for `yt-dlp` + `ffmpeg` audio prep
 - Synced bilingual video player with compact controls, tap-to-seek transcript segments, and debug/cost copy
 - Translation pipeline using AI SDK 6 with the OpenRouter community provider
@@ -19,7 +19,7 @@ Bolo is a calm synced bilingual video player for people who want to paste a YouT
 - Expo client stays thin and subscribes to Convex for job status, saved entries, timed segments, and debug/cost info.
 - Video preview is fetched directly in the app with YouTube oEmbed.
 - New submissions create `processingVersion: 2` entries and start a Convex Workflow.
-- Convex Workflow calls a Cloudflare Container for audio download/normalize/chunk, a Cloudflare Worker for Whisper, and OpenRouter for segment-preserving translation.
+- Convex Workflow calls a Cloudflare Container for audio download/normalize/chunk, a Cloudflare Worker proxy for Groq Whisper, and OpenRouter for segment-preserving translation pinned to Cerebras.
 - R2 chunk keys are scoped by entry and random job id, then deleted through the Worker cleanup endpoint after success.
 
 ## Local setup
@@ -48,21 +48,22 @@ pnpm convex:dev
 EXPO_PUBLIC_CONVEX_URL=https://your-project.convex.cloud
 ```
 
-5. Set the AI and media pipeline environment in Convex:
+5. Set the AI and media pipeline environment in Convex. The translation model is routed to Cerebras by the Convex action:
 
 ```bash
 pnpm exec convex env set OPENROUTER_API_KEY=your_key
-pnpm exec convex env set OPENROUTER_TRANSLATION_MODEL=google/gemma-4-26b-a4b-it
+pnpm exec convex env set OPENROUTER_TRANSLATION_MODEL=google/gemma-4-31b-it
 pnpm exec convex env set BOLO_MEDIA_PREP_URL=https://your-media-prep-container.example.com
 pnpm exec convex env set BOLO_CONTAINER_SECRET=your_shared_container_secret
 pnpm exec convex env set BOLO_WHISPER_WORKER_URL=https://bolo-whisper-worker.your-subdomain.workers.dev
 pnpm exec convex env set BOLO_WORKER_SECRET=your_shared_worker_secret
 ```
 
-6. Deploy the Cloudflare Worker after creating the `bolo-media` R2 bucket and setting `BOLO_WORKER_SECRET` as a Worker secret:
+6. Deploy the Cloudflare Worker after creating the `bolo-media` R2 bucket and setting both Worker secrets. `GROQ_API_KEY` must be a valid Groq API key and must not be committed:
 
 ```bash
 wrangler secret put BOLO_WORKER_SECRET --config cloudflare/whisper-worker/wrangler.toml
+wrangler secret put GROQ_API_KEY --config cloudflare/whisper-worker/wrangler.toml
 wrangler deploy --config cloudflare/whisper-worker/wrangler.toml
 ```
 

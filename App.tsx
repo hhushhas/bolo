@@ -66,6 +66,12 @@ function ConnectedApp() {
     }
 
     const latestRun = debugInfo.processingRuns.at(-1);
+    const groqCostUsd = debugInfo.usageEvents
+      .filter((event) => event.provider === 'groq')
+      .reduce(
+        (total, event) => total + (event.providerReportedCostUsd ?? event.estimatedCostUsd ?? 0),
+        0,
+      );
     const cloudflareCostUsd = debugInfo.usageEvents
       .filter((event) => event.provider === 'cloudflare')
       .reduce(
@@ -85,6 +91,7 @@ function ConnectedApp() {
       durationSec: selectedEntry.durationSec,
       entryId: selectedEntry._id,
       errorMessage: selectedEntry.errorMessage,
+      groqCostUsd,
       openRouterCostUsd,
       processingStage: selectedEntry.processingStage,
       realtimeFactor: latestRun?.realtimeFactor,

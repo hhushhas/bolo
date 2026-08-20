@@ -59,7 +59,12 @@ const usageEventValidator = v.object({
   metadata: v.optional(v.string()),
   model: v.optional(v.string()),
   promptTokens: v.optional(v.number()),
-  provider: v.union(v.literal('cloudflare'), v.literal('openrouter'), v.literal('internal')),
+  provider: v.union(
+    v.literal('cloudflare'),
+    v.literal('groq'),
+    v.literal('openrouter'),
+    v.literal('internal'),
+  ),
   providerReportedCostUsd: v.optional(v.number()),
   providerRequestId: v.optional(v.string()),
   quantity: v.optional(v.number()),

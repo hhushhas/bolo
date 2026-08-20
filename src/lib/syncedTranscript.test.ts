@@ -215,6 +215,7 @@ describe('buildDebugReportText', () => {
         chunkCount: 12,
         cloudflareCostUsd: 0.0012,
         entryId: 'entry123',
+        groqCostUsd: 0.0008,
         openRouterCostUsd: 0.0045,
         realtimeFactor: 3.25,
         status: 'ready',
@@ -224,6 +225,6 @@ describe('buildDebugReportText', () => {
         },
         videoTitle: 'A useful lesson',
       }),
-    ).toContain('Realtime factor: 3.25x');
+    ).toContain('Groq cost: $0.000800');
   });
 });

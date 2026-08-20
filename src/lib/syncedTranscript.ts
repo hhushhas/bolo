@@ -28,6 +28,7 @@ export type ProcessingDebugReport = {
   durationSec?: number;
   entryId: string;
   errorMessage?: string;
+  groqCostUsd?: number;
   openRouterCostUsd?: number;
   processingStage?: string;
   realtimeFactor?: number;
@@ -481,6 +482,7 @@ export const buildDebugReportText = (report: ProcessingDebugReport) => {
     report.cloudflareCostUsd === undefined
       ? null
       : `Cloudflare cost: $${report.cloudflareCostUsd.toFixed(6)}`,
+    report.groqCostUsd === undefined ? null : `Groq cost: $${report.groqCostUsd.toFixed(6)}`,
     report.openRouterCostUsd === undefined
       ? null
       : `OpenRouter cost: $${report.openRouterCostUsd.toFixed(6)}`,

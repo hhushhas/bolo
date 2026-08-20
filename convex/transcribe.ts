@@ -157,8 +157,7 @@ const translateTranscript = async ({
   }
 
   const apiKey = process.env.OPENROUTER_API_KEY;
-  const model =
-    process.env.OPENROUTER_TRANSLATION_MODEL ?? 'google/gemma-4-26b-a4b-it';
+  const model = process.env.OPENROUTER_TRANSLATION_MODEL ?? 'google/gemma-4-31b-it';
 
   if (!apiKey) {
     throw new Error('Missing OPENROUTER_API_KEY in Convex environment variables.');
@@ -169,7 +168,12 @@ const translateTranscript = async ({
 
   for (const chunk of splitForTranslation(transcriptText)) {
     const { text } = await generateText({
-      model: provider(model),
+      model: provider(model, {
+        provider: {
+          allow_fallbacks: false,
+          order: ['cerebras'],
+        },
+      }),
       prompt: [
         `Translate the following transcript from ${sourceLanguageLabel} to ${targetLanguageLabel}.`,
         'Keep the meaning faithful, keep paragraph breaks, and return only the translated text.',
@@ -200,7 +204,12 @@ const buildReaderExtras = async ({
 
   try {
     const { text } = await generateText({
-      model: provider(model),
+      model: provider(model, {
+        provider: {
+          allow_fallbacks: false,
+          order: ['cerebras'],
+        },
+      }),
       prompt: [
         `You are creating easy reading notes in ${readerLanguageLabel}.`,
         'Return valid JSON with exactly this shape:',
@@ -256,8 +265,7 @@ export const processEntry = action({
   handler: async (ctx, args) => {
     const { videoId } = parseYouTubeUrl(args.youtubeUrl);
     const apiKey = process.env.OPENROUTER_API_KEY;
-    const model =
-      process.env.OPENROUTER_TRANSLATION_MODEL ?? 'google/gemma-4-26b-a4b-it';
+    const model = process.env.OPENROUTER_TRANSLATION_MODEL ?? 'google/gemma-4-31b-it';
 
     try {
       await ctx.runMutation(internal.entries.updateProgress, {

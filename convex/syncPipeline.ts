@@ -400,7 +400,7 @@ export const transcribeChunk = internalAction({
       },
       method: 'POST',
     }, {
-      serviceName: 'Cloudflare Whisper worker',
+      serviceName: 'Groq Whisper worker',
       timeoutMs: WHISPER_TIMEOUT_MS,
     });
     const elapsedSec = (Date.now() - startedAt) / 1000;
@@ -411,7 +411,7 @@ export const transcribeChunk = internalAction({
       event: {
         estimatedCostUsd: result.estimatedCostUsd,
         model: result.model,
-        provider: 'cloudflare',
+        provider: 'groq',
         quantity: result.audioMinutes,
         stage: 'transcription',
         status: 'succeeded',
@@ -451,7 +451,7 @@ export const translateSegmentBatch = internalAction({
   handler: async (ctx, args) => {
     const startedAt = Date.now();
     const apiKey = requireEnv('OPENROUTER_API_KEY');
-    const model = process.env.OPENROUTER_TRANSLATION_MODEL ?? 'google/gemma-4-26b-a4b-it';
+    const model = process.env.OPENROUTER_TRANSLATION_MODEL ?? 'google/gemma-4-31b-it';
     const provider = createOpenRouter({ apiKey });
     const items = args.segments.map((segment) => ({
       id: String(segment.index),
@@ -462,6 +462,10 @@ export const translateSegmentBatch = internalAction({
       const { providerMetadata, text, usage } = await generateText({
         maxOutputTokens: TRANSLATION_MAX_OUTPUT_TOKENS,
         model: provider(model, {
+          provider: {
+            allow_fallbacks: false,
+            order: ['cerebras'],
+          },
           usage: {
             include: true,
           },
