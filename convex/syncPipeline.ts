@@ -11,6 +11,7 @@ import {
   parseSegmentTranslations,
   type DisplayTranscriptSegment,
 } from '../src/lib/syncedTranscript';
+import { parseYouTubeUrl } from '../src/lib/youtube';
 
 const chunkValidator = v.object({
   durationMs: v.number(),
@@ -174,7 +175,12 @@ export const prepareMedia = internalAction({
   handler: async (ctx, args) => {
     const mediaPrepUrl = requireEnv('BOLO_MEDIA_PREP_URL');
     const secret = requireEnv('BOLO_CONTAINER_SECRET');
+    const parsedYouTube = parseYouTubeUrl(args.youtubeUrl);
     const startedAt = Date.now();
+
+    if (!parsedYouTube) {
+      throw new Error('Please paste a valid YouTube video or Shorts link.');
+    }
 
     await ctx.runMutation(internal.entries.updateProgress, {
       attemptId: args.attemptId,
@@ -206,7 +212,7 @@ export const prepareMedia = internalAction({
           chunkSeconds: MEDIA_PREP_CHUNK_SECONDS,
           entryId: args.entryId,
           jobId: createJobId(),
-          youtubeUrl: args.youtubeUrl,
+          youtubeUrl: parsedYouTube.cleanUrl,
         }),
         headers: {
           authorization: `Bearer ${secret}`,

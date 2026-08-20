@@ -1,0 +1,39 @@
+Subject: Billing appeal / refund request for unexpected Cloudflare Containers charges on bolo-media-prep
+
+Hello Cloudflare Billing Support,
+
+I am requesting a review, refund, or account credit for unexpected Cloudflare Developer Platform usage charges on account 5281943bd26d5bdcf4c3915606cd6bfb.
+
+Billing period shown in the dashboard: July 2026 cycle, usage observed June 6 to June 12, 2026.
+Current dashboard figures at time of mitigation:
+- Total cost observed: $57.32
+- Projected cycle cost: $245.68
+- Average daily cost: $8.19
+- Primary line item: Container Memory, approximately $41.86
+- Additional line items included Durable Objects compute, Container Disk, Container vCPU, and Durable Objects storage/operations.
+
+The spend was caused by a Cloudflare Containers deployment named:
+- Worker: bolo-media-prep
+- Container app: bolo-media-prep-mediaprepcontainer
+- Container app ID: a032bb70-e7fe-4b6c-bb9e-b53e7fac0183
+- Account ID: 5281943bd26d5bdcf4c3915606cd6bfb
+
+On June 12, 2026, I investigated using Wrangler and found that the container app had two healthy/live configured instances. Its configuration was standard-2 with 6 GiB memory per instance and max_instances = 2. That aligns with the dashboard's Container Memory cost being the dominant billable usage.
+
+This usage was accidental/rogue and not intentional production usage. The Worker wrapper allowed /prepare requests to start a paid container before validating the bearer authorization secret. This meant unexpected or unauthorized requests could trigger paid container startup before authentication occurred.
+
+Immediate mitigation taken on June 12, 2026:
+- Deleted the Cloudflare Container app bolo-media-prep-mediaprepcontainer using Wrangler.
+- Deleted the deployed Worker bolo-media-prep using Wrangler to prevent further triggers.
+- Patched the local Worker wrapper so /prepare now validates Authorization: Bearer before starting any container.
+- Reduced future max_instances from 2 to 1 before any future redeployment.
+
+Wrangler evidence:
+- wrangler containers list showed bolo-media-prep-mediaprepcontainer with 2 live instances.
+- wrangler containers info a032bb70-e7fe-4b6c-bb9e-b53e7fac0183 showed memory = 6GiB, max_instances = 2, health.instances.healthy = 2.
+- wrangler containers delete a032bb70-e7fe-4b6c-bb9e-b53e7fac0183 completed successfully.
+- wrangler delete --name bolo-media-prep completed successfully.
+
+I am asking Cloudflare to please review these charges as accidental/rogue usage caused by unintended container triggering, and to refund or credit the unexpected charges for the affected period. We acted immediately once discovered and have removed the deployed resources to stop additional spend.
+
+Thank you.

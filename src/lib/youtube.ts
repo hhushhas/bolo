@@ -9,6 +9,14 @@ const youtubeHostnames = new Set([
   'm.youtube.com',
 ]);
 
+const youtubeVideoIdPattern = /^[A-Za-z0-9_-]{11}$/;
+
+const normalizeVideoId = (value: string | null | undefined) => {
+  const videoId = value?.trim();
+
+  return videoId && youtubeVideoIdPattern.test(videoId) ? videoId : null;
+};
+
 export type YouTubePreview = {
   authorName?: string;
   kind: 'short' | 'video';
@@ -35,7 +43,7 @@ export const parseYouTubeUrl = (value: string) => {
     }
 
     if (url.hostname.includes('youtu.be')) {
-      const videoId = url.pathname.split('/').filter(Boolean)[0];
+      const videoId = normalizeVideoId(url.pathname.split('/').filter(Boolean)[0]);
 
       if (videoId) {
         return {
@@ -49,7 +57,7 @@ export const parseYouTubeUrl = (value: string) => {
     const pathname = url.pathname.split('/').filter(Boolean);
 
     if (pathname[0] === 'watch') {
-      const videoId = url.searchParams.get('v');
+      const videoId = normalizeVideoId(url.searchParams.get('v'));
 
       if (videoId) {
         return {
@@ -66,7 +74,7 @@ export const parseYouTubeUrl = (value: string) => {
       pathname[0] === 'live' ||
       pathname[0] === 'v'
     ) {
-      const videoId = pathname[1];
+      const videoId = normalizeVideoId(pathname[1]);
 
       if (videoId) {
         return {

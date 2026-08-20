@@ -45,6 +45,35 @@ def run_command(args: list[str], cwd: Path, timeout: int = 900) -> subprocess.Co
     )
 
 
+def youtube_cookie_args(workdir: Path) -> list[str]:
+    if not YOUTUBE_COOKIES_B64:
+        return []
+
+    cookies_path = workdir / "youtube-cookies.txt"
+    cookies_path.write_bytes(base64.b64decode(YOUTUBE_COOKIES_B64))
+    return ["--cookies", str(cookies_path)]
+
+
+def read_youtube_duration(workdir: Path, youtube_url: str) -> float | None:
+    result = run_command(
+        [
+            "yt-dlp",
+            "--no-playlist",
+            "--no-warnings",
+            "--skip-download",
+            "--dump-json",
+            *youtube_cookie_args(workdir),
+            youtube_url,
+        ],
+        cwd=workdir,
+        timeout=180,
+    )
+    metadata = json.loads(result.stdout)
+    duration = metadata.get("duration")
+
+    return float(duration) if isinstance(duration, (int, float)) else None
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as file:
@@ -113,11 +142,7 @@ def download_audio(workdir: Path, youtube_url: str) -> Path:
         output_template,
     ]
 
-    if YOUTUBE_COOKIES_B64:
-        cookies_path = workdir / "youtube-cookies.txt"
-        cookies_path.write_bytes(base64.b64decode(YOUTUBE_COOKIES_B64))
-        args.extend(["--cookies", str(cookies_path)])
-
+    args.extend(youtube_cookie_args(workdir))
     args.append(youtube_url)
     result = run_command(
         args,
@@ -190,12 +215,18 @@ def prepare_media(payload: dict[str, Any]) -> dict[str, Any]:
 
     try:
       download_started_at = time.monotonic()
+      metadata_duration_sec = read_youtube_duration(workdir, youtube_url)
+      if metadata_duration_sec and metadata_duration_sec > MAX_VIDEO_SECONDS:
+          limit_minutes = round(MAX_VIDEO_SECONDS / 60)
+          raise ValueError(f"This video is longer than the {limit_minutes} minute limit.")
+
       source_path = download_audio(workdir, youtube_url)
       download_sec = time.monotonic() - download_started_at
 
       duration_sec = ffprobe_duration(source_path)
       if duration_sec > MAX_VIDEO_SECONDS:
-          raise ValueError("This video is longer than the 2 hour limit.")
+          limit_minutes = round(MAX_VIDEO_SECONDS / 60)
+          raise ValueError(f"This video is longer than the {limit_minutes} minute limit.")
 
       ffmpeg_started_at = time.monotonic()
       chunk_paths = chunk_audio(source_path, workdir / "chunks", chunk_seconds)

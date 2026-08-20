@@ -18,6 +18,26 @@ describe('parseYouTubeUrl', () => {
     });
   });
 
+  it('handles youtu.be sharing URLs', () => {
+    expect(parseYouTubeUrl('https://youtu.be/abc123xyz99?si=share-token')).toMatchObject({
+      cleanUrl: 'https://www.youtube.com/watch?v=abc123xyz99',
+      kind: 'video',
+      videoId: 'abc123xyz99',
+    });
+  });
+
+  it('rejects malformed IDs made from pasted-together links', () => {
+    expect(
+      parseYouTubeUrl(
+        'https://www.youtube.com/watch?v=Hhttps://youtu.be/H01Kj_X2QKw?si=oNTyK3IR5daNWcJM01',
+      ),
+    ).toBeNull();
+  });
+
+  it('rejects invalid youtu.be IDs', () => {
+    expect(parseYouTubeUrl('https://youtu.be/not-a-real-youtube-id')).toBeNull();
+  });
+
   it('rejects non-youtube links', () => {
     expect(parseYouTubeUrl('https://example.com/watch?v=nope')).toBeNull();
   });
