@@ -34,3 +34,12 @@
 - The full ESLint command is blocked before linting by the pre-existing `typescript@7.0.1-rc` change: Expo's ESLint parser requires the legacy TypeScript compiler entry point, which TypeScript 7 RC does not export. This does not affect the deployed Python downloader or the verified Convex retry path, and the TypeScript type-check still passes.
 - All existing modified and untracked files were staged for the user's approved commit and push, including the Dockerfile update, container hardening, URL validation, TypeScript/lockfile change, monitor script, billing note, and this log.
 - Post-deploy verification covered five distinct valid YouTube videos through the existing Convex workflow. `D4I4lhPxBK8`, `XxJ9f2rXrKo`, `FCBD6vjCmqc`, `e2ch0ynvSsU`, and `F6peBpnuUOg` each recorded `media_prep` as `succeeded`, reached `ready`, and completed audio download in 4.96 to 6.08 seconds.
+
+## Provider upgrade launch
+
+- Replaced the Cloudflare Workers AI Whisper call with Groq `whisper-large-v3-turbo` behind the existing `bolo-whisper-worker` URL. The worker keeps the same authenticated JSON contract, sends MP3 chunks as multipart form data, requests verbose JSON segment timestamps, and records Groq's $0.04/hour equivalent as the usage price.
+- Changed OpenRouter translation to `google/gemma-4-31b-it` with provider order pinned to Cerebras and fallbacks disabled. The legacy translation action uses the same model and route.
+- The older Groq keys in the vault returned HTTP 401. A valid existing Groq credential was verified against `/v1/models` and a real transcription request, then uploaded only as the Cloudflare Worker secret; no key was committed.
+- Deployed Worker version `2db2cbd8-d96b-4a14-9367-0fe9cc12e87d` and Convex functions to `shocking-bandicoot-353`. A real YouTube smoke entry (`jNQXAC9IVRw`) reached `ready` in 17.142 seconds with one Groq transcription event, one `google/gemma-4-31b-it` translation event, three timed transcript segments, and Arabic translations. A direct OpenRouter probe returned `provider: Cerebras`.
+- Local typecheck, Vitest (27 tests), Wrangler dry-run, and Convex deployment passed. ESLint remains blocked before linting by the existing TypeScript 7 RC package export mismatch. The two bounded code reviews found and the changes fixed the missing Groq secret deployment note and the missing Groq cost in the debug report.
+- Committed as `938500d` (`feat: route transcription and translation through faster providers`) and pushed to `origin/main`. The worktree is clean; no mobile build or media-prep change was made.
