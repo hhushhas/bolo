@@ -13,9 +13,6 @@ temp_dir=$(mktemp -d "${RUNNER_TEMP:-/private/tmp}/bolo-android-signing.XXXXXX")
 
 cleanup() {
   find "$temp_dir" -depth -delete 2>/dev/null || true
-  if [[ -f "$repo_root/android/keystore.properties" ]]; then
-    find "$repo_root/android/keystore.properties" -delete 2>/dev/null || true
-  fi
 }
 
 trap cleanup EXIT HUP INT TERM
