@@ -64,6 +64,9 @@ fi
 if ! rg -q 'android\.signedOutputDirectory' "$build_gradle"; then
   perl -0pi -e 's/\nandroid \{/\ndef signedOutputDirectory = findProperty("android.signedOutputDirectory")\nif (signedOutputDirectory) {\n    layout.buildDirectory.set(file(signedOutputDirectory))\n}\n\nandroid {/s' "$build_gradle"
 fi
+if ! rg -q 'storePassword keystoreProperties' "$build_gradle"; then
+  perl -0pi -e 's/        }\n    }\n    buildTypes {/        }\n        release {\n            storeFile file(keystoreProperties["storeFile"])\n            storePassword keystoreProperties["storePassword"]\n            keyAlias keystoreProperties["keyAlias"]\n            keyPassword keystoreProperties["keyPassword"]\n        }\n    }\n    buildTypes {/s; s/signingConfig signingConfigs\.debug\n            def enableShrinkResources/signingConfig signingConfigs.release\n            def enableShrinkResources/s' "$build_gradle"
+fi
 
 mkdir -p "$output_dir" "$temp_dir/gradle"
 (cd "$repo_root/android" && GRADLE_USER_HOME="$temp_dir/gradle" ./gradlew --no-daemon -Pandroid.signingPropertiesFile="$properties_path" -Pandroid.signedOutputDirectory="$output_dir" bundleRelease)
