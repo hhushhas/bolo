@@ -5,6 +5,9 @@ set -euo pipefail
 repo_root=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 manifest="$repo_root/release/manifest.json"
 output_dir=${SIGNED_OUTPUT_DIR:-"$repo_root/build/release"}
+if [[ "$output_dir" != /* ]]; then
+  output_dir="$repo_root/$output_dir"
+fi
 temp_dir=$(mktemp -d "${RUNNER_TEMP:-/private/tmp}/bolo-android-signing.XXXXXX")
 
 cleanup() {
@@ -31,22 +34,42 @@ item_json="$temp_dir/signing-item.json"
 op document get "$signing_item" --vault "Mobile App Releases" --out-file "$keystore_path" --force >/dev/null
 op item get "$signing_item" --vault "Mobile App Releases" --format json > "$item_json"
 
-store_password=$(jq -er '.fields[] | select(.label == "storePassword") | .value' "$item_json")
-key_alias=$(jq -er '.fields[] | select(.label == "keyAlias") | .value' "$item_json")
-key_password=$(jq -er '.fields[] | select(.label == "keyPassword") | .value' "$item_json")
+store_password_file="$temp_dir/store-password"
+key_alias_file="$temp_dir/key-alias"
+key_password_file="$temp_dir/key-password"
+jq -er '.fields[] | select(.label == "storePassword") | .value' "$item_json" > "$store_password_file"
+jq -er '.fields[] | select(.label == "keyAlias") | .value' "$item_json" > "$key_alias_file"
+jq -er '.fields[] | select(.label == "keyPassword") | .value' "$item_json" > "$key_password_file"
 expected_certificate=$(jq -er '.android.certificate_sha256' "$manifest")
 
-cat > "$repo_root/android/keystore.properties" <<EOF
-storeFile=$keystore_path
-storePassword=$store_password
-keyAlias=$key_alias
-keyPassword=$key_password
-EOF
-chmod 600 "$repo_root/android/keystore.properties" "$keystore_path" "$item_json"
+properties_path="$temp_dir/keystore.properties"
+{
+  printf 'storeFile=%s\n' "$keystore_path"
+  printf 'storePassword='
+  cat "$store_password_file"
+  printf 'keyAlias='
+  cat "$key_alias_file"
+  printf 'keyPassword='
+  cat "$key_password_file"
+} > "$properties_path"
+chmod 600 "$properties_path" "$store_password_file" "$key_alias_file" "$key_password_file"
 
-mkdir -p "$output_dir"
-(cd "$repo_root/android" && ./gradlew --no-daemon bundleRelease)
-built_bundle=$(find "$repo_root/android/app/build/outputs/bundle/release" -type f -name '*.aab' -print -quit)
+chmod 600 "$keystore_path" "$item_json"
+
+build_gradle="$repo_root/android/app/build.gradle"
+if ! rg -q '^import java\.io\.FileInputStream$' "$build_gradle"; then
+  perl -0pi -e 's/\A/import java.io.FileInputStream\nimport java.util.Properties\n\ndef signingPropertiesPath = findProperty("android.signingPropertiesFile")\ndef keystorePropertiesFile = signingPropertiesPath ? file(signingPropertiesPath) : rootProject.file("keystore.properties")\ndef keystoreProperties = new Properties()\n\nif (keystorePropertiesFile.exists()) {\n    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))\n}\n/' "$build_gradle"
+fi
+if ! rg -q '^def signingPropertiesPath' "$build_gradle"; then
+  perl -0pi -e 's/^def keystorePropertiesFile = rootProject\.file\("keystore\.properties"\)$/def signingPropertiesPath = findProperty("android.signingPropertiesFile")\ndef keystorePropertiesFile = signingPropertiesPath ? file(signingPropertiesPath) : rootProject.file("keystore.properties")/m' "$build_gradle"
+fi
+if ! rg -q 'android\.signedOutputDirectory' "$build_gradle"; then
+  perl -0pi -e 's/\nandroid \{/\ndef signedOutputDirectory = findProperty("android.signedOutputDirectory")\nif (signedOutputDirectory) {\n    layout.buildDirectory.set(file(signedOutputDirectory))\n}\n\nandroid {/s' "$build_gradle"
+fi
+
+mkdir -p "$output_dir" "$temp_dir/gradle"
+(cd "$repo_root/android" && GRADLE_USER_HOME="$temp_dir/gradle" ./gradlew --no-daemon -Pandroid.signingPropertiesFile="$properties_path" -Pandroid.signedOutputDirectory="$output_dir" bundleRelease)
+built_bundle=$(find "$output_dir/outputs/bundle/release" -type f -name '*.aab' -print -quit)
 if [[ -z "$built_bundle" ]]; then
   echo "Bolo Android signed build did not produce an AAB." >&2
   exit 1
