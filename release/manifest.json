@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "product": "Bolo",
+  "android": {
+    "package_name": "com.q9labsai.bolo",
+    "signing_status": "blocked-unrecoverable-local-asset",
+    "local_keystore_path": "android/app/bolo-release.jks",
+    "local_keystore_sha256": "76ebc55ed88d1ddd293061d8603aa656bd2ab6f5568e0dd4b4cc5d169a974252",
+    "signing_item": null,
+    "reason": "The local keystore is present but its password and certificate cannot be verified. It was not copied to 1Password."
+  },
+  "apple": {
+    "bundle_id": null,
+    "signing_status": "missing-local-production-assets",
+    "reason": "No Bolo App Store bundle identifier, distribution certificate, or provisioning profile is present on either allowed machine."
+  }
+}
